@@ -211,6 +211,20 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
   <section class="panel" aria-labelledby="hist-h">
     <h2 id="hist-h">Your trips</h2>
     <div class="trips" id="trips"></div>
+    <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px">
+      <div class="eyebrow">Export your data</div>
+      <style>#ex-trips,#ex-stops,#ex-gps,#ex-backup,label[for=restore-in]{flex:1 1 140px;text-align:center}</style>
+      <div class="row">
+        <button class="btn ghost" id="ex-trips" type="button">Trips CSV</button>
+        <button class="btn ghost" id="ex-stops" type="button">Stops CSV</button>
+        <button class="btn ghost" id="ex-gps" type="button">GPS tracks CSV</button>
+      </div>
+      <div class="row">
+        <button class="btn ghost" id="ex-backup" type="button">Full backup</button>
+        <label class="btn ghost file" for="restore-in">Restore backup<input id="restore-in" type="file" accept=".json,application/json"></label>
+      </div>
+      <p class="note" id="ex-msg">CSV files open in Excel or Google Sheets. Make a full backup now and then: trips live only in this browser, and clearing it deletes them.</p>
+    </div>
   </section>
 </div>
 
@@ -223,7 +237,12 @@ const $ = id => document.getElementById(id);
 /* ---------- storage (per-device, optional) ---------- */
 const KEY = 'smoothdrive.trips.v1';
 function loadTrips(){ try{ return JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){ return []; } }
-function saveTrips(t){ try{ localStorage.setItem(KEY, JSON.stringify(t.slice(0,20))); }catch(e){} }
+function saveTrips(t){
+  t = t.slice(0,50);
+  for (let keep = t.length; keep >= 0; keep--){ // if storage is full, drop raw GPS tracks from the oldest trips first
+    try{ localStorage.setItem(KEY, JSON.stringify(t.map((x,i) => i < keep ? x : (({pts, ...rest}) => rest)(x)))); return; }catch(e){}
+  }
+}
 let trips = loadTrips();
 
 /* ---------- analyzer: raw horizontal accel (m/s²) -> smoothed g, events ---------- */
@@ -390,7 +409,7 @@ function stop(){
   const d = new Date(r.start);
   const trip = { id:String(r.start), name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
     source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.speeds),
-    traffic: trafficOf(r.pts) };
+    traffic: trafficOf(r.pts), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
   trips.unshift(trip); saveTrips(trips); show(trip); renderList();
 }
 
@@ -639,6 +658,60 @@ function renderList(){
   if (!trips.length){ const p = document.createElement('p'); p.className='empty'; p.textContent='Your recorded trips will appear above the example.'; box.appendChild(p); }
   if (current) document.querySelectorAll('.trip').forEach(b => b.classList.toggle('on', b.dataset.id === current.id));
 }
+
+/* ---------- export ---------- */
+const exMsg = $('ex-msg');
+function download(name, text, type){
+  try{
+    const url = URL.createObjectURL(new Blob([text], {type}));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    exMsg.textContent = `Saved ${name}. Check your Downloads folder.`;
+  }catch(e){ exMsg.textContent = 'This browser blocked the download. Open the app in Chrome or Safari and try again.'; }
+}
+const csv = rows => rows.map(r => r.map(v => { v = v ?? ''; v = String(v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(',')).join('\n');
+const pad = n => String(n).padStart(2,'0');
+const dstr = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const tstr = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const stamp = () => dstr(Date.now());
+function needTrips(){ if (!trips.length){ exMsg.textContent = 'No recorded trips yet. Record a trip first; the example trip is not exported.'; return false; } return true; }
+$('ex-trips').addEventListener('click', () => {
+  if (!needTrips()) return;
+  download(`smooth-drive-trips-${stamp()}.csv`, csv([['date','start_time','weekday','duration_min','distance_km','avg_kmh','stuck_min','stopped_min','stops','harsh_events','moderate_events','score','source','name'],
+    ...trips.map(t => { const tf = t.traffic;
+      return [dstr(t.start), tstr(t.start), new Date(t.start).toLocaleDateString('en-US',{weekday:'short'}), (t.durS/60).toFixed(1), t.distM ? (t.distM/1000).toFixed(2) : '',
+        t.distM ? (t.distM/1000/(t.durS/3600)).toFixed(1) : '', tf ? (tf.slowS/60).toFixed(1) : '', tf ? (tf.stoppedS/60).toFixed(1) : '', tf ? tf.stops.length : '',
+        t.events.filter(e=>e.level==='harsh').length, t.events.filter(e=>e.level==='mod').length, scoreOf(t), t.source, t.name]; })]), 'text/csv');
+});
+$('ex-stops').addEventListener('click', () => {
+  if (!needTrips()) return;
+  const rows = [['trip_date','trip_start','stop_time','minutes_into_trip','duration_s','latitude','longitude','map_link']];
+  trips.forEach(t => (t.traffic?.stops || []).forEach(s => rows.push([dstr(t.start), tstr(t.start), tstr(t.start + s.t*1000), (s.t/60).toFixed(1), s.dur, s.lat, s.lon, mapLink(s)])));
+  if (rows.length === 1){ exMsg.textContent = 'No stops recorded yet. Stops need location access during a trip.'; return; }
+  download(`smooth-drive-stops-${stamp()}.csv`, csv(rows), 'text/csv');
+});
+$('ex-gps').addEventListener('click', () => {
+  if (!needTrips()) return;
+  const rows = [['trip_date','trip_start','time','seconds_into_trip','latitude','longitude','speed_kmh']];
+  trips.forEach(t => (t.pts || []).forEach(p => rows.push([dstr(t.start), tstr(t.start), tstr(t.start + p.t*1000), p.t, p.lat, p.lon, (p.v*3.6).toFixed(1)])));
+  if (rows.length === 1){ exMsg.textContent = 'No GPS tracks saved yet. Tracks are kept for trips recorded from now on.'; return; }
+  download(`smooth-drive-gps-${stamp()}.csv`, csv(rows), 'text/csv');
+});
+$('ex-backup').addEventListener('click', () => {
+  if (!needTrips()) return;
+  download(`smooth-drive-backup-${stamp()}.json`, JSON.stringify({ app:'smooth-drive', version:1, exported:new Date().toISOString(), trips }), 'application/json');
+});
+$('restore-in').addEventListener('change', async ev => {
+  const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
+  try{
+    const data = JSON.parse(await f.text());
+    if (data.app !== 'smooth-drive' || !Array.isArray(data.trips)) throw 0;
+    const have = new Set(trips.map(t => t.id)); let added = 0;
+    data.trips.forEach(t => { if (t && t.id && Array.isArray(t.events) && !have.has(t.id)){ trips.push(t); added++; } });
+    trips.sort((a,b) => b.start - a.start); saveTrips(trips); renderList(); show(trips[0] || SAMPLE);
+    exMsg.textContent = added ? `Restored ${added} trip${added>1?'s':''}.` : 'All trips in that backup are already here.';
+  }catch(e){ exMsg.textContent = 'That file is not a Smooth Drive backup.'; }
+});
 
 renderList();
 show(trips[0] || SAMPLE);

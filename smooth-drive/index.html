@@ -54,6 +54,10 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
 .stat span{font-size:.75rem;color:var(--muted)}
 .btn{appearance:none;border:0;border-radius:12px;padding:14px 18px;font-family:var(--display);font-size:1.25rem;font-weight:600;letter-spacing:.03em;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
 .btn.stop{background:var(--crit);color:#fff}
+.btn.ghost.danger{color:var(--crit);border-color:color-mix(in srgb,var(--crit) 45%,var(--line))}
+.btn.ghost.danger.armed{background:var(--crit);color:#fff;border-color:var(--crit)}
+.paused .readout .num{color:var(--muted)}
+.paused .readout .unit{display:none}
 .btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);font-size:1rem;padding:10px 14px}
 .btn:focus-visible,.trip:focus-visible,.file:focus-within{outline:3px solid var(--accent);outline-offset:2px}
 .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -135,6 +139,7 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
     </div>
     <div class="row">
       <button class="btn" id="rec-btn" type="button">Start trip</button>
+      <button class="btn ghost" id="pause-btn" type="button" hidden>Pause</button>
       <label class="btn ghost file" for="csv-in">Import CSV<input id="csv-in" type="file" accept=".csv,text/csv"></label>
     </div>
     <div class="row" id="native-row" hidden><button class="btn ghost" id="battery-btn" type="button">Let it run in background</button></div>
@@ -223,6 +228,10 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
       <div class="row">
         <button class="btn ghost" id="ex-backup" type="button">Full backup</button>
         <label class="btn ghost file" for="restore-in">Restore backup<input id="restore-in" type="file" accept=".json,application/json"></label>
+      </div>
+      <div class="row">
+        <button class="btn ghost danger" id="clear-btn" type="button">Clear all data</button>
+        <button class="btn ghost" id="clear-cancel" type="button" hidden>Cancel</button>
       </div>
       <p class="note" id="ex-msg">CSV files open in Excel or Google Sheets. Make a full backup now and then: trips live only in this browser, and clearing it deletes them.</p>
     </div>
@@ -322,11 +331,37 @@ const btn = $('rec-btn'), msg = $('sensor-msg');
 
 function showMsg(html){ msg.innerHTML = html; msg.hidden = false; }
 
+/* ---------- pause / resume ---------- */
+const pauseBtn = $('pause-btn');
+function setPauseUI(visible, paused){
+  pauseBtn.hidden = !visible;
+  pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+  document.querySelector('.gauge').classList.toggle('paused', !!paused);
+  if (paused){ $('g-now').textContent = 'Paused'; $('g-fill').style.width = '0'; }
+}
+pauseBtn.addEventListener('click', () => {
+  if (NATIVE){
+    const p = JSON.parse(Android.liveStatus()).paused;
+    p ? Android.resumeTrip() : Android.pauseTrip();
+    setPauseUI(true, !p);
+    return;
+  }
+  if (!rec) return;
+  if (rec.pauseAt === null){
+    rec.an.finish(recT()); rec.pauseAt = performance.now(); rec.lastPos = null; rec.gNow = 0;
+    setPauseUI(true, true);
+  } else {
+    rec.pausedMs += performance.now() - rec.pauseAt; rec.pauseAt = null; rec.an.lastT = null;
+    setPauseUI(true, false);
+  }
+});
+
 /* ---------- Android app bridge (background recording) ---------- */
 const NATIVE = !!(window.Android && window.Android.startTrip);
 let nativeRec = false, livePoll = null;
 function setRecUI(on){
   btn.textContent = on ? 'Stop trip' : 'Start trip'; btn.classList.toggle('stop', on);
+  if (!on) setPauseUI(false, false);
   if (!on){ $('g-now').textContent = '0.00'; $('g-fill').style.width = '0'; }
 }
 function nativeStart(){
@@ -341,6 +376,7 @@ function startPoll(){ clearInterval(livePoll); livePoll = setInterval(pollLive, 
 function pollLive(){
   let s; try{ s = JSON.parse(Android.liveStatus()); }catch(e){ return; }
   if (!s.recording){ clearInterval(livePoll); nativeRec = false; setRecUI(false); waitImport(10); return; }
+  setPauseUI(true, !!s.paused);
   $('g-now').textContent = s.g.toFixed(2); $('g-fill').style.width = Math.min(100, s.g/0.6*100) + '%';
   $('l-time').textContent = mmss(s.elapsed); $('l-speed').textContent = s.speed >= 0 ? Math.round(s.speed*3.6) : '–';
   $('l-ev').textContent = s.events; $('l-stuck').textContent = mmss(s.stuck);
@@ -390,13 +426,13 @@ async function start(){
       if (r !== 'granted'){ showMsg('Motion access was declined. Allow motion and orientation access in your browser settings, then try again.'); return; }
     }
   }catch(e){ blocked(); return; }
-  rec = { an:new Analyzer(), t0:performance.now(), start:Date.now(), grav:null, speeds:[], pts:[], dist:0, lastPos:null, got:0, geo:null };
+  rec = { an:new Analyzer(), t0:performance.now(), pausedMs:0, pauseAt:null, start:Date.now(), grav:null, speeds:[], pts:[], dist:0, lastPos:null, got:0, geo:null };
   window.addEventListener('devicemotion', onMotion);
   if (navigator.geolocation){
     try{ rec.geo = navigator.geolocation.watchPosition(onPos, ()=>{}, { enableHighAccuracy:true, maximumAge:0 }); }catch(e){}
   }
   try{ wake = await navigator.wakeLock?.request('screen'); }catch(e){ wake = null; }
-  btn.textContent = 'Stop trip'; btn.classList.add('stop');
+  btn.textContent = 'Stop trip'; btn.classList.add('stop'); setPauseUI(true, false);
   rec.timer = setInterval(tick, 500);
   setTimeout(() => { if (rec && rec.got === 0){ cleanup(); blocked(); } }, 2500);
 }
@@ -405,12 +441,14 @@ function blocked(){
   showMsg('No motion data is reaching this page. Check that this browser allows motion and location access for this site, and open it in Chrome or Safari. You can also import a CSV from a sensor logger app. Meanwhile, the sample trip below shows what a report looks like.');
 }
 
+function recT(){ const now = performance.now(); return (now - rec.t0 - rec.pausedMs - (rec.pauseAt !== null ? now - rec.pauseAt : 0)) / 1000; }
+
 function onMotion(e){
-  if (!rec) return;
+  if (!rec || rec.pauseAt !== null) return;
   const ig = e.accelerationIncludingGravity, la = e.acceleration;
   if (!ig || ig.x === null) return;
   rec.got++;
-  const t = (performance.now() - rec.t0) / 1000;
+  const t = recT();
   // slow low-pass of total accel = gravity direction
   if (!rec.grav) rec.grav = { x:ig.x, y:ig.y, z:ig.z };
   const k = 0.02; rec.grav.x += k*(ig.x-rec.grav.x); rec.grav.y += k*(ig.y-rec.grav.y); rec.grav.z += k*(ig.z-rec.grav.z);
@@ -426,8 +464,8 @@ function onMotion(e){
 }
 
 function onPos(p){
-  if (!rec) return;
-  const t = (performance.now() - rec.t0) / 1000, c = p.coords;
+  if (!rec || rec.pauseAt !== null) return;
+  const t = recT(), c = p.coords;
   if (c.accuracy > 50) return;
   let v = (c.speed !== null && !isNaN(c.speed)) ? c.speed : null;
   if (rec.lastPos){
@@ -444,10 +482,11 @@ function onPos(p){
 
 function tick(){
   if (!rec) return;
+  if (rec.pauseAt !== null){ $('l-time').textContent = mmss(recT()); return; }
   const g = rec.gNow || 0;
   $('g-now').textContent = g.toFixed(2);
   $('g-fill').style.width = Math.min(100, g/0.6*100) + '%';
-  $('l-time').textContent = mmss((performance.now()-rec.t0)/1000);
+  $('l-time').textContent = mmss(recT());
   $('l-ev').textContent = rec.an.events.length;
   let slow = 0; for (let i=1;i<rec.pts.length;i++) if (rec.pts[i].v < SLOW) slow += Math.min(10, rec.pts[i].t - rec.pts[i-1].t);
   $('l-stuck').textContent = mmss(slow);
@@ -458,12 +497,12 @@ function cleanup(){
   if (rec && rec.geo !== null && navigator.geolocation) navigator.geolocation.clearWatch(rec.geo);
   if (rec) clearInterval(rec.timer);
   try{ wake?.release(); }catch(e){} wake = null;
-  btn.textContent = 'Start trip'; btn.classList.remove('stop');
+  btn.textContent = 'Start trip'; btn.classList.remove('stop'); setPauseUI(false, false);
   $('g-now').textContent = '0.00'; $('g-fill').style.width = '0';
 }
 
 function stop(){
-  const r = rec; const durS = (performance.now()-r.t0)/1000;
+  const r = rec; const durS = recT();
   r.an.finish(durS); cleanup(); rec = null;
   if (durS < 20){ showMsg('Trip was under 20 seconds, so it was not saved.'); return; }
   const d = new Date(r.start);
@@ -773,6 +812,29 @@ $('restore-in').addEventListener('change', async ev => {
     exMsg.textContent = added ? `Restored ${added} trip${added>1?'s':''}.` : 'All trips in that backup are already here.';
   }catch(e){ exMsg.textContent = 'That file is not a Smooth Drive backup.'; }
 });
+
+/* ---------- clear data ---------- */
+const clearBtn = $('clear-btn'), clearCancel = $('clear-cancel');
+let clearTimer = null;
+function disarmClear(){ clearTimeout(clearTimer); clearBtn.classList.remove('armed'); clearBtn.textContent = 'Clear all data'; clearCancel.hidden = true; }
+clearBtn.addEventListener('click', () => {
+  if (!trips.length){ exMsg.textContent = 'There are no recorded trips to clear.'; return; }
+  if (!clearBtn.classList.contains('armed')){
+    clearBtn.classList.add('armed');
+    clearBtn.textContent = `Delete ${trips.length} trip${trips.length>1?'s':''}`;
+    clearCancel.hidden = false;
+    exMsg.textContent = 'This permanently deletes every recorded trip on this device. Make a full backup first if you may need them.';
+    clearTimer = setTimeout(disarmClear, 8000);
+    return;
+  }
+  disarmClear();
+  const n = trips.length;
+  trips = [];
+  try{ localStorage.removeItem(KEY); }catch(e){}
+  renderList(); show(SAMPLE);
+  exMsg.textContent = `Deleted ${n} trip${n>1?'s':''}.`;
+});
+clearCancel.addEventListener('click', () => { disarmClear(); exMsg.textContent = 'Nothing was deleted.'; });
 
 renderList();
 show(trips[0] || SAMPLE);

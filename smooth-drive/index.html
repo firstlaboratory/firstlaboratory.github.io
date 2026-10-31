@@ -137,8 +137,9 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
       <button class="btn" id="rec-btn" type="button">Start trip</button>
       <label class="btn ghost file" for="csv-in">Import CSV<input id="csv-in" type="file" accept=".csv,text/csv"></label>
     </div>
+    <div class="row" id="native-row" hidden><button class="btn ghost" id="battery-btn" type="button">Let it run in background</button></div>
     <div class="alert" id="sensor-msg" hidden></div>
-    <p class="note">Mount the phone firmly before you start. A phone sliding on the seat reads as harsh driving. Keep the screen on during the trip.</p>
+    <p class="note" id="rec-note">Mount the phone firmly before you start. A phone sliding on the seat reads as harsh driving. Keep the screen on during the trip.</p>
   </section>
 
   <div class="tabs" role="tablist" aria-label="Report view">
@@ -321,6 +322,65 @@ const btn = $('rec-btn'), msg = $('sensor-msg');
 
 function showMsg(html){ msg.innerHTML = html; msg.hidden = false; }
 
+/* ---------- Android app bridge (background recording) ---------- */
+const NATIVE = !!(window.Android && window.Android.startTrip);
+let nativeRec = false, livePoll = null;
+function setRecUI(on){
+  btn.textContent = on ? 'Stop trip' : 'Start trip'; btn.classList.toggle('stop', on);
+  if (!on){ $('g-now').textContent = '0.00'; $('g-fill').style.width = '0'; }
+}
+function nativeStart(){
+  msg.hidden = true;
+  const r = Android.startTrip();
+  if (r === 'started') window.onNativeStarted();
+  else showMsg('Allow location and notifications so Smooth Drive can record. The trip starts as soon as you allow them.');
+}
+window.onNativeStarted = () => { msg.hidden = true; nativeRec = true; setRecUI(true); startPoll(); };
+window.onNativeDenied = () => showMsg('Location access was declined. Smooth Drive needs it for speed and traffic. Allow it in Android Settings, Apps, Smooth Drive, Permissions.');
+function startPoll(){ clearInterval(livePoll); livePoll = setInterval(pollLive, 700); pollLive(); }
+function pollLive(){
+  let s; try{ s = JSON.parse(Android.liveStatus()); }catch(e){ return; }
+  if (!s.recording){ clearInterval(livePoll); nativeRec = false; setRecUI(false); waitImport(10); return; }
+  $('g-now').textContent = s.g.toFixed(2); $('g-fill').style.width = Math.min(100, s.g/0.6*100) + '%';
+  $('l-time').textContent = mmss(s.elapsed); $('l-speed').textContent = s.speed >= 0 ? Math.round(s.speed*3.6) : '–';
+  $('l-ev').textContent = s.events; $('l-stuck').textContent = mmss(s.stuck);
+}
+function nativeStop(){ Android.stopTrip(); clearInterval(livePoll); nativeRec = false; setRecUI(false); waitImport(15); }
+function waitImport(n){ if (Android.isRecording() && n > 0) setTimeout(() => waitImport(n-1), 300); else importPending(); }
+function importPending(){
+  let arr; try{ arr = JSON.parse(Android.takePendingTrips()); }catch(e){ return; }
+  let last = null;
+  arr.forEach(raw => {
+    try{
+      if (!trips.some(t => t.id === raw.id)){
+        const an = new Analyzer(), T = raw.acc.t, H = raw.acc.h;
+        for (let i=0;i<T.length;i++) an.push(T[i], H[i]);
+        an.finish(raw.durS);
+        const pts = raw.pts.map(p => ({ t:p[0], lat:p[1], lon:p[2], v:p[3] }));
+        const d = new Date(raw.start);
+        last = { id:raw.id, name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
+          source:'live', start:raw.start, durS:raw.durS, distM: raw.distM > 50 ? raw.distM : null, trace:an.trace,
+          events:classify(an.events, pts.map(p => ({ t:p.t, v:p.v }))), traffic: trafficOf(pts),
+          pts: pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
+        trips.push(last);
+      }
+    }catch(e){}
+    Android.ackTrip(raw.id);
+  });
+  if (last){ trips.sort((a,b) => b.start - a.start); saveTrips(trips); renderList(); show(last); }
+}
+window.onNativeResume = () => {
+  if (Android.isRecording()){ if (!nativeRec){ nativeRec = true; setRecUI(true); startPoll(); } }
+  else importPending();
+};
+window.onNativeSaved = ok => { $('ex-msg').textContent = ok ? 'File saved.' : 'Save cancelled.'; };
+function nativeInit(){
+  $('native-row').hidden = false;
+  $('rec-note').textContent = 'Recording continues with the screen off or the phone locked. A notification shows while a trip runs; you can stop it from there. Mount the phone firmly so it does not slide.';
+  $('battery-btn').addEventListener('click', () => Android.openBatterySettings());
+  window.onNativeResume();
+}
+
 async function start(){
   msg.hidden = true;
   if (typeof DeviceMotionEvent === 'undefined'){ blocked(); return; }
@@ -413,7 +473,7 @@ function stop(){
   trips.unshift(trip); saveTrips(trips); show(trip); renderList();
 }
 
-btn.addEventListener('click', () => rec ? stop() : start());
+btn.addEventListener('click', () => NATIVE ? (nativeRec ? nativeStop() : nativeStart()) : (rec ? stop() : start()));
 
 /* ---------- CSV import (phyphox, Sensor Logger, generic t,x,y,z) ---------- */
 $('csv-in').addEventListener('change', async ev => {
@@ -662,6 +722,7 @@ function renderList(){
 /* ---------- export ---------- */
 const exMsg = $('ex-msg');
 function download(name, text, type){
+  if (NATIVE){ Android.saveFile(name, type, text); exMsg.textContent = 'Choose where to save the file.'; return; }
   try{
     const url = URL.createObjectURL(new Blob([text], {type}));
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -717,6 +778,7 @@ renderList();
 show(trips[0] || SAMPLE);
 let savedTab = 'drive'; try{ savedTab = localStorage.getItem('smoothdrive.tab') || 'drive'; }catch(e){}
 setTab(savedTab);
+if (NATIVE) nativeInit();
 window.addEventListener('resize', drawChart);
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawChart);
 new MutationObserver(drawChart).observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });

@@ -88,6 +88,22 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
 .trip small{display:block;color:var(--muted);font-size:.78rem}
 .trip.on{background:var(--sunk);border-radius:8px}
 .empty{color:var(--muted);font-size:.9rem;margin:0}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--sunk);padding:4px;border-radius:12px}
+.tab{appearance:none;border:0;border-radius:9px;padding:10px;background:transparent;color:var(--muted);font-family:var(--display);font-size:1.15rem;font-weight:600;letter-spacing:.03em;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.tab:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+.big{font-family:var(--display);font-weight:700;font-size:2.6rem;line-height:1}
+.split{display:flex;height:22px;border-radius:6px;overflow:hidden;background:var(--sunk)}
+.split>div{height:100%}
+.seg-move{background:var(--good)}.seg-crawl{background:var(--warn)}.seg-stop{background:var(--crit)}
+.events a,.spots a{color:var(--accent);font-weight:700;text-decoration:none;font-size:.85rem}
+.spots{width:100%;border-collapse:collapse;font-size:.9rem}
+.spots th{font-family:var(--mono);font-weight:400;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:4px 6px 6px 0}
+.spots td{padding:8px 6px 8px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.spots td.n{font-family:var(--mono);text-align:right}
+.spots tr.best td{color:var(--good);font-weight:700}
+.bar{height:8px;border-radius:4px;background:var(--crit);opacity:.75;min-width:4px}
+.callout{background:var(--accent-soft);border-radius:10px;padding:10px 12px;font-size:.92rem}
 @media (max-width:420px){.live,.stats{grid-template-columns:repeat(2,1fr)}}
 @media (prefers-reduced-motion:reduce){.fill{transition:none}}
 </style>
@@ -100,7 +116,7 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
     <div>
       <div class="eyebrow">Driving habit coach</div>
       <h1>Smooth Drive</h1>
-      <p>Measures how hard you brake, accelerate and corner, then scores each trip.</p>
+      <p>Scores how smoothly you brake, accelerate and corner, and shows where traffic holds you up.</p>
     </div>
   </header>
 
@@ -114,8 +130,8 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
     <div class="live">
       <div class="stat"><b id="l-time">0:00</b><span>Elapsed</span></div>
       <div class="stat"><b id="l-speed">–</b><span>km/h</span></div>
-      <div class="stat"><b id="l-mod">0</b><span>Moderate</span></div>
-      <div class="stat"><b id="l-harsh">0</b><span>Harsh</span></div>
+      <div class="stat"><b id="l-ev">0</b><span>Harsh events</span></div>
+      <div class="stat"><b id="l-stuck">0:00</b><span>Stuck</span></div>
     </div>
     <div class="row">
       <button class="btn" id="rec-btn" type="button">Start trip</button>
@@ -125,7 +141,44 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
     <p class="note">Mount the phone firmly before you start. A phone sliding on the seat reads as harsh driving. Keep the screen on during the trip.</p>
   </section>
 
-  <section class="panel" aria-labelledby="rep-h" id="report">
+  <div class="tabs" role="tablist" aria-label="Report view">
+    <button class="tab" role="tab" id="tab-drive" aria-controls="report" aria-selected="true" type="button">Driving</button>
+    <button class="tab" role="tab" id="tab-traffic" aria-controls="traffic" aria-selected="false" type="button">Traffic</button>
+  </div>
+
+  <section class="panel" aria-labelledby="tr-h" id="traffic" role="tabpanel" hidden>
+    <div>
+      <span class="tag" id="t-tag">Sample trip</span>
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-top:6px"><span class="big num" id="t-stuck">–</span><h2 id="tr-h">stuck in traffic</h2></div>
+      <div class="note" id="t-date"></div>
+    </div>
+    <div id="t-body">
+      <div class="split" id="t-split" aria-hidden="true"><div class="seg-move"></div><div class="seg-crawl"></div><div class="seg-stop"></div></div>
+      <div class="legend" style="margin-top:6px" id="t-legend"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="t-dur">–</b><span>Trip time</span></div>
+      <div class="stat"><b id="t-stops">–</b><span>Stops ≥ 20 s</span></div>
+      <div class="stat"><b id="t-long">–</b><span>Longest stop</span></div>
+      <div class="stat"><b id="t-speed">–</b><span>Avg km/h</span></div>
+    </div>
+    <div>
+      <div class="eyebrow" style="margin-bottom:4px">Where you stopped</div>
+      <ul class="events" id="t-stoplist"></ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2>Worst spots</h2><span class="tag" id="ws-tag">Example</span></div>
+      <p class="note" id="ws-note"></p>
+      <div style="overflow-x:auto"><table class="spots" id="ws-table"></table></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2>Best time to leave</h2><span class="tag" id="bt-tag">Example</span></div>
+      <div class="callout" id="bt-callout"></div>
+      <div style="overflow-x:auto"><table class="spots" id="bt-table"></table></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="rep-h" id="report" role="tabpanel">
     <div class="score">
       <div class="ring" id="ring"><div id="r-score">–</div></div>
       <div>
@@ -163,6 +216,7 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
 
 <script>
 (() => {
+const SLOW = 1.4; // m/s, about 5 km/h
 const G = 9.80665, MOD = 0.22, HARSH = 0.35, END = 0.14, TAU = 0.4, STORE_HZ = 10;
 const $ = id => document.getElementById(id);
 
@@ -257,7 +311,7 @@ async function start(){
       if (r !== 'granted'){ showMsg('Motion access was declined. Allow motion and orientation access in your browser settings, then try again.'); return; }
     }
   }catch(e){ blocked(); return; }
-  rec = { an:new Analyzer(), t0:performance.now(), start:Date.now(), grav:null, speeds:[], dist:0, lastPos:null, got:0, geo:null };
+  rec = { an:new Analyzer(), t0:performance.now(), start:Date.now(), grav:null, speeds:[], pts:[], dist:0, lastPos:null, got:0, geo:null };
   window.addEventListener('devicemotion', onMotion);
   if (navigator.geolocation){
     try{ rec.geo = navigator.geolocation.watchPosition(onPos, ()=>{}, { enableHighAccuracy:true, maximumAge:0 }); }catch(e){}
@@ -295,15 +349,18 @@ function onMotion(e){
 function onPos(p){
   if (!rec) return;
   const t = (performance.now() - rec.t0) / 1000, c = p.coords;
+  if (c.accuracy > 50) return;
+  let v = (c.speed !== null && !isNaN(c.speed)) ? c.speed : null;
   if (rec.lastPos){
-    const R = 6371e3, toR = Math.PI/180;
-    const dLat = (c.latitude-rec.lastPos.lat)*toR, dLon = (c.longitude-rec.lastPos.lon)*toR;
-    const a = Math.sin(dLat/2)**2 + Math.cos(c.latitude*toR)*Math.cos(rec.lastPos.lat*toR)*Math.sin(dLon/2)**2;
-    const d = 2*R*Math.asin(Math.sqrt(a));
+    const d = distM(rec.lastPos, { lat:c.latitude, lon:c.longitude });
     if (c.accuracy < 30 && d < 200) rec.dist += d;
+    if (v === null && t > rec.lastPos.t) v = d / (t - rec.lastPos.t);
   }
-  rec.lastPos = { lat:c.latitude, lon:c.longitude };
-  if (c.speed !== null && !isNaN(c.speed)){ rec.speeds.push({ t, v:c.speed }); $('l-speed').textContent = Math.round(c.speed*3.6); }
+  rec.lastPos = { lat:c.latitude, lon:c.longitude, t };
+  if (v === null) v = 0;
+  rec.speeds.push({ t, v });
+  rec.pts.push({ t:+t.toFixed(1), lat:+c.latitude.toFixed(5), lon:+c.longitude.toFixed(5), v:+v.toFixed(2) });
+  $('l-speed').textContent = Math.round(v*3.6);
 }
 
 function tick(){
@@ -312,8 +369,9 @@ function tick(){
   $('g-now').textContent = g.toFixed(2);
   $('g-fill').style.width = Math.min(100, g/0.6*100) + '%';
   $('l-time').textContent = mmss((performance.now()-rec.t0)/1000);
-  $('l-mod').textContent = rec.an.events.filter(e=>e.level==='mod').length;
-  $('l-harsh').textContent = rec.an.events.filter(e=>e.level==='harsh').length;
+  $('l-ev').textContent = rec.an.events.length;
+  let slow = 0; for (let i=1;i<rec.pts.length;i++) if (rec.pts[i].v < SLOW) slow += Math.min(10, rec.pts[i].t - rec.pts[i-1].t);
+  $('l-stuck').textContent = mmss(slow);
 }
 
 function cleanup(){
@@ -331,7 +389,8 @@ function stop(){
   if (durS < 20){ showMsg('Trip was under 20 seconds, so it was not saved.'); return; }
   const d = new Date(r.start);
   const trip = { id:String(r.start), name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
-    source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.speeds) };
+    source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.speeds),
+    traffic: trafficOf(r.pts) };
   trips.unshift(trip); saveTrips(trips); show(trip); renderList();
 }
 
@@ -408,6 +467,7 @@ function show(trip){
   if (h.length) tips.push('Harsh events (≥ 0.35 g) are the ones passengers feel. Cutting these first gives the biggest gain in score.');
   $('tips').innerHTML = tips.map(t => `<li>${t}</li>`).join('');
   drawChart();
+  showTraffic(trip);
   document.querySelectorAll('.trip').forEach(b => b.classList.toggle('on', b.dataset.id === trip.id));
 }
 
@@ -437,16 +497,143 @@ function drawChart(){
     x.beginPath(); x.arc(px, py, 4, 0, 7); x.fillStyle = v(e.level==='harsh'?'--crit':'--warn'); x.fill(); x.lineWidth=1.5; x.strokeStyle=v('--surface'); x.stroke(); });
 }
 
+/* ---------- traffic: stops, worst spots, best departure ---------- */
+function distM(a, b){
+  const R = 6371e3, r = Math.PI/180, dLat = (b.lat-a.lat)*r, dLon = (b.lon-a.lon)*r;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function trafficOf(pts){
+  if (!pts || pts.length < 10) return null;
+  let slow = 0, cur = null; const stops = [];
+  const close = c => {
+    const s = { t:Math.round(c.t0), dur:Math.round(c.t1-c.t0), lat:+(c.la/c.n).toFixed(5), lon:+(c.lo/c.n).toFixed(5) };
+    const last = stops[stops.length-1];
+    if (last && s.t - (last.t+last.dur) < 20 && distM(last, s) < 80) last.dur = s.t + s.dur - last.t; // stop-start crawl counts as one hold-up
+    else stops.push(s);
+  };
+  for (let i=1;i<pts.length;i++){
+    const p = pts[i], dt = Math.min(10, p.t - pts[i-1].t);
+    if (p.v < SLOW){ slow += dt; if (!cur) cur = { t0:pts[i-1].t, t1:p.t, la:0, lo:0, n:0 }; cur.la += p.lat; cur.lo += p.lon; cur.n++; cur.t1 = p.t; }
+    else if (cur){ close(cur); cur = null; }
+  }
+  if (cur) close(cur);
+  const real = stops.filter(s => s.dur >= 20);
+  const stopped = Math.min(Math.round(slow), real.reduce((a,s)=>a+s.dur, 0));
+  const a = pts[0], b = pts[pts.length-1];
+  return { slowS:Math.round(slow), stoppedS:stopped, stops:real, from:{lat:a.lat,lon:a.lon}, to:{lat:b.lat,lon:b.lon} };
+}
+
+/* example commutes so the insights have something to show before you record */
+function sampleCommutes(){
+  const spots = [{lat:12.97160,lon:80.22090,name:'A'},{lat:12.98020,lon:80.21850},{lat:12.98900,lon:80.21400}];
+  const from = {lat:12.96200,lon:80.22600}, to = {lat:12.99800,lon:80.20900};
+  const plan = [ // depart h:m, trip min, stop seconds at each spot
+    [8,22,14,[70,40,25]],[8,25,15,[85,30,0]],[8,37,17,[110,60,40]],[8,41,18,[120,75,30]],
+    [8,52,21,[150,95,60]],[8,55,22,[160,110,45]],[9,6,25,[190,130,80]],[9,10,26,[210,120,90]]];
+  const day = 864e5, base = new Date(); base.setSeconds(0,0);
+  return plan.map(([h,m,mins,waits],i) => {
+    const d = new Date(base.getTime() - (i+2)*day); d.setHours(h,m);
+    let t = 120; const stops = [];
+    waits.forEach((w,j) => { t += 150 + j*90; if (w) stops.push({ t, dur:w, lat:spots[j].lat, lon:spots[j].lon }); t += w; });
+    const stoppedS = stops.reduce((a,s)=>a+s.dur,0);
+    return { start:d.getTime(), durS:mins*60, traffic:{ slowS:stoppedS + 40 + i*12, stoppedS, stops, from, to } };
+  });
+}
+const EXAMPLES = sampleCommutes();
+
+const mapLink = s => `https://www.google.com/maps?q=${s.lat},${s.lon}`;
+const minsTxt = s => s < 60 ? Math.round(s)+' s' : (s/60).toFixed(s < 600 ? 1 : 0)+' min';
+
+function showTraffic(trip){
+  const tf = trip.traffic;
+  $('t-tag').textContent = $('r-tag').textContent;
+  $('t-date').textContent = $('r-date').textContent;
+  $('t-dur').textContent = mmss(trip.durS);
+  const list = $('t-stoplist'); list.innerHTML = '';
+  if (!tf){
+    $('t-stuck').textContent = '–'; $('tr-h').textContent = 'no GPS for this trip';
+    $('t-body').hidden = true; ['t-stops','t-long','t-speed'].forEach(id => $(id).textContent = '–');
+    list.innerHTML = '<li><span></span><span class="empty">Traffic needs location data. Allow location access when you start a trip.</span><span></span></li>';
+  } else {
+    $('t-body').hidden = false;
+    $('t-stuck').textContent = mmss(tf.slowS); $('tr-h').textContent = 'stuck in traffic';
+    const crawl = Math.max(0, tf.slowS - tf.stoppedS), move = Math.max(0, trip.durS - tf.slowS);
+    const segs = $('t-split').children, tot = Math.max(1, move + crawl + tf.stoppedS);
+    [move, crawl, tf.stoppedS].forEach((v,i) => segs[i].style.width = (v/tot*100)+'%');
+    $('t-legend').innerHTML = `<span><i style="background:var(--good)"></i>Moving ${minsTxt(move)}</span><span><i style="background:var(--warn)"></i>Crawling ${minsTxt(crawl)}</span><span><i style="background:var(--crit)"></i>Stopped ${minsTxt(tf.stoppedS)}</span>`;
+    $('t-stops').textContent = tf.stops.length;
+    $('t-long').textContent = tf.stops.length ? mmss(Math.max(...tf.stops.map(s=>s.dur))) : '–';
+    $('t-speed').textContent = trip.distM ? Math.round(trip.distM/1000 / (trip.durS/3600)) : '–';
+    if (!tf.stops.length) list.innerHTML = '<li><span></span><span class="empty">No stops longer than 20 seconds. Clear roads.</span><span></span></li>';
+    tf.stops.forEach(s => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="num note">${mmss(s.t)}</span><span>Held up for <b class="num">${mmss(s.dur)}</b></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`;
+      list.appendChild(li);
+    });
+  }
+  renderInsights();
+}
+
+function renderInsights(){
+  const mine = trips.filter(t => t.traffic && t.source==='live');
+  const useMine = mine.length >= 3, set = useMine ? mine : EXAMPLES;
+  // worst spots: cluster stops within 100 m across trips
+  const cl = [];
+  set.forEach(t => t.traffic.stops.forEach(s => {
+    let c = cl.find(c => distM(c, s) < 100);
+    if (!c){ c = { lat:s.lat, lon:s.lon, total:0, n:0 }; cl.push(c); }
+    c.total += s.dur; c.n++;
+  }));
+  cl.sort((a,b) => b.total - a.total);
+  const top = cl.slice(0,5), maxT = top[0]?.total || 1;
+  $('ws-tag').textContent = useMine ? `${mine.length} trips` : 'Example';
+  $('ws-note').textContent = useMine ? 'Places where you lose the most time, added up over all your trips.' : 'Record 3 or more trips with location on to see your own. These rows are example data.';
+  $('ws-table').innerHTML = top.length ? '<tr><th>Spot</th><th style="text-align:right">Seen</th><th style="text-align:right">Avg wait</th><th style="width:28%">Total</th><th></th></tr>' +
+    top.map((c,i) => `<tr><td>#${i+1}</td><td class="n">${c.n}×</td><td class="n">${mmss(c.total/c.n)}</td><td><div class="bar" style="width:${c.total/maxT*100}%"></div></td><td><a href="${mapLink(c)}" target="_blank" rel="noopener">Map ↗</a></td></tr>`).join('')
+    : '<tr><td class="empty">No stops recorded yet.</td></tr>';
+  // best departure: busiest route, 15-minute slots
+  const key = t => [t.traffic.from, t.traffic.to].map(p => (Math.round(p.lat/0.005)*0.005).toFixed(3)+','+(Math.round(p.lon/0.005)*0.005).toFixed(3)).join('>');
+  const routes = {}; set.forEach(t => (routes[key(t)] ||= []).push(t));
+  const route = Object.values(routes).sort((a,b) => b.length - a.length)[0] || [];
+  const slots = {};
+  route.forEach(t => { const d = new Date(t.start), m = d.getHours()*60 + Math.floor(d.getMinutes()/15)*15; (slots[m] ||= []).push(t); });
+  const rows = Object.entries(slots).map(([m,ts]) => ({ m:+m, n:ts.length, dur:ts.reduce((a,t)=>a+t.durS,0)/ts.length, stuck:ts.reduce((a,t)=>a+t.traffic.slowS,0)/ts.length })).sort((a,b)=>a.m-b.m);
+  const fmt = m => new Date(2000,0,1,Math.floor(m/60),m%60).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+  $('bt-tag').textContent = useMine ? `${route.length} trips, same route` : 'Example';
+  if (rows.length >= 2){
+    const best = rows.reduce((a,b) => b.dur < a.dur ? b : a), worst = rows.reduce((a,b) => b.dur > a.dur ? b : a);
+    $('bt-callout').innerHTML = `Leaving around <b>${fmt(best.m)}</b> takes <b>${Math.round((worst.dur-best.dur)/60)} min</b> less than leaving around ${fmt(worst.m)}, on average.`;
+    $('bt-table').innerHTML = '<tr><th>Leave</th><th style="text-align:right">Trips</th><th style="text-align:right">Trip time</th><th style="text-align:right">Stuck</th></tr>' +
+      rows.map(r => `<tr class="${r===best?'best':''}"><td>${fmt(r.m)}</td><td class="n">${r.n}</td><td class="n">${mmss(r.dur)}</td><td class="n">${mmss(r.stuck)}</td></tr>`).join('');
+  } else {
+    $('bt-callout').textContent = 'Record the same route at a few different departure times, and this will show which time is fastest.';
+    $('bt-table').innerHTML = '';
+  }
+}
+
+/* ---------- tabs ---------- */
+function setTab(name){
+  const tr = name === 'traffic';
+  $('tab-drive').setAttribute('aria-selected', String(!tr)); $('tab-traffic').setAttribute('aria-selected', String(tr));
+  $('report').hidden = tr; $('traffic').hidden = !tr;
+  try{ localStorage.setItem('smoothdrive.tab', name); }catch(e){}
+  if (!tr) drawChart();
+}
+$('tab-drive').addEventListener('click', () => setTab('drive'));
+$('tab-traffic').addEventListener('click', () => setTab('traffic'));
+
 /* ---------- history ---------- */
 const SAMPLE = sampleTrip();
+SAMPLE.traffic = EXAMPLES[0].traffic;
 function renderList(){
   const box = $('trips'); box.innerHTML = '';
   const all = [...trips, SAMPLE];
   all.forEach(t => {
     const s = scoreOf(t), b = document.createElement('button');
     b.className = 'trip'; b.type = 'button'; b.dataset.id = t.id;
-    b.innerHTML = `<span class="s" style="color:var(${s>=85?'--good':s>=60?'--warn':'--crit'})">${s}</span><span>${t.name}<small>${mmss(t.durS)}${t.distM?' · '+(t.distM/1000).toFixed(1)+' km':''} · ${t.events.length} event${t.events.length===1?'':'s'}</small></span><span class="note">${t.source==='sample'?'Example':new Date(t.start).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</span>`;
-    b.addEventListener('click', () => { show(t); $('report').scrollIntoView({behavior:'smooth', block:'start'}); });
+    b.innerHTML = `<span class="s" style="color:var(${s>=85?'--good':s>=60?'--warn':'--crit'})">${s}</span><span>${t.name}<small>${mmss(t.durS)}${t.distM?' · '+(t.distM/1000).toFixed(1)+' km':''} · ${t.events.length} event${t.events.length===1?'':'s'}${t.traffic?' · '+mmss(t.traffic.slowS)+' stuck':''}</small></span><span class="note">${t.source==='sample'?'Example':new Date(t.start).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</span>`;
+    b.addEventListener('click', () => { show(t); $('tab-drive').parentNode.scrollIntoView({behavior:'smooth', block:'start'}); });
     box.appendChild(b);
   });
   if (!trips.length){ const p = document.createElement('p'); p.className='empty'; p.textContent='Your recorded trips will appear above the example.'; box.appendChild(p); }
@@ -455,6 +642,8 @@ function renderList(){
 
 renderList();
 show(trips[0] || SAMPLE);
+let savedTab = 'drive'; try{ savedTab = localStorage.getItem('smoothdrive.tab') || 'drive'; }catch(e){}
+setTab(savedTab);
 window.addEventListener('resize', drawChart);
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawChart);
 new MutationObserver(drawChart).observe(document.documentElement, { attributes:true, attributeFilter:['data-theme'] });

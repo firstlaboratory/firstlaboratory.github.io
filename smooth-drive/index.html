@@ -91,6 +91,14 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
 .trip .s{font-family:var(--display);font-weight:700;font-size:1.5rem;text-align:center}
 .trip small{display:block;color:var(--muted);font-size:.78rem}
 .trip.on{background:var(--sunk);border-radius:8px}
+.btn.small{font-size:.95rem;padding:7px 12px;border-radius:9px}
+.btn:disabled{opacity:.45;cursor:default}
+.selbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.selecting .trip{grid-template-columns:24px 44px 1fr auto}
+.box{width:22px;height:22px;border-radius:6px;border:2px solid var(--line);display:grid;place-items:center;color:transparent;font-size:14px;font-weight:700;line-height:1}
+.trip[aria-checked="true"] .box{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.trip[aria-checked="true"]{background:var(--accent-soft);border-radius:8px}
+.trip.locked{cursor:default;opacity:.55}
 .empty{color:var(--muted);font-size:.9rem;margin:0}
 .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--sunk);padding:4px;border-radius:12px}
 .tab{appearance:none;border:0;border-radius:9px;padding:10px;background:transparent;color:var(--muted);font-family:var(--display);font-size:1.15rem;font-weight:600;letter-spacing:.03em;cursor:pointer}
@@ -215,7 +223,15 @@ header p{margin:4px 0 0;color:var(--muted);max-width:40ch}
   </section>
 
   <section class="panel" aria-labelledby="hist-h">
-    <h2 id="hist-h">Your trips</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 id="hist-h">Your trips</h2>
+      <button class="btn ghost small" id="sel-btn" type="button">Select</button>
+    </div>
+    <div class="selbar" id="selbar" hidden>
+      <button class="btn ghost small" id="sel-all" type="button">Select all</button>
+      <button class="btn ghost small danger" id="sel-del" type="button" disabled>Delete selected</button>
+      <span class="note" id="sel-msg" aria-live="polite">Tap trips to select them.</span>
+    </div>
     <div class="trips" id="trips"></div>
     <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px">
       <div class="eyebrow">Export your data</div>
@@ -744,14 +760,30 @@ $('tab-traffic').addEventListener('click', () => setTab('traffic'));
 /* ---------- history ---------- */
 const SAMPLE = sampleTrip();
 SAMPLE.traffic = EXAMPLES[0].traffic;
+let selecting = false; const selected = new Set();
 function renderList(){
   const box = $('trips'); box.innerHTML = '';
+  box.classList.toggle('selecting', selecting);
+  box.setAttribute('role', selecting ? 'group' : '');
   const all = [...trips, SAMPLE];
   all.forEach(t => {
     const s = scoreOf(t), b = document.createElement('button');
     b.className = 'trip'; b.type = 'button'; b.dataset.id = t.id;
-    b.innerHTML = `<span class="s" style="color:var(${s>=85?'--good':s>=60?'--warn':'--crit'})">${s}</span><span>${t.name}<small>${mmss(t.durS)}${t.distM?' · '+(t.distM/1000).toFixed(1)+' km':''} · ${t.events.length} event${t.events.length===1?'':'s'}${t.traffic?' · '+mmss(t.traffic.slowS)+' stuck':''}</small></span><span class="note">${t.source==='sample'?'Example':new Date(t.start).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</span>`;
-    b.addEventListener('click', () => { show(t); $('tab-drive').parentNode.scrollIntoView({behavior:'smooth', block:'start'}); });
+    const isSample = t.source === 'sample';
+    if (selecting){
+      if (isSample){ b.classList.add('locked'); b.disabled = true; }
+      else { b.setAttribute('role','checkbox'); b.setAttribute('aria-checked', String(selected.has(t.id))); }
+    }
+    b.innerHTML = (selecting ? `<span class="box" aria-hidden="true">${isSample ? '' : '✓'}</span>` : '') + `<span class="s" style="color:var(${s>=85?'--good':s>=60?'--warn':'--crit'})">${s}</span><span>${t.name}<small>${mmss(t.durS)}${t.distM?' · '+(t.distM/1000).toFixed(1)+' km':''} · ${t.events.length} event${t.events.length===1?'':'s'}${t.traffic?' · '+mmss(t.traffic.slowS)+' stuck':''}</small></span><span class="note">${t.source==='sample'?'Example':new Date(t.start).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</span>`;
+    b.addEventListener('click', () => {
+      if (selecting){
+        if (isSample) return;
+        selected.has(t.id) ? selected.delete(t.id) : selected.add(t.id);
+        b.setAttribute('aria-checked', String(selected.has(t.id)));
+        updateSelBar(); return;
+      }
+      show(t); $('tab-drive').parentNode.scrollIntoView({behavior:'smooth', block:'start'});
+    });
     box.appendChild(b);
   });
   if (!trips.length){ const p = document.createElement('p'); p.className='empty'; p.textContent='Your recorded trips will appear above the example.'; box.appendChild(p); }
@@ -831,10 +863,54 @@ clearBtn.addEventListener('click', () => {
   const n = trips.length;
   trips = [];
   try{ localStorage.removeItem(KEY); }catch(e){}
+  if (selecting) setSelecting(false);
   renderList(); show(SAMPLE);
   exMsg.textContent = `Deleted ${n} trip${n>1?'s':''}.`;
 });
 clearCancel.addEventListener('click', () => { disarmClear(); exMsg.textContent = 'Nothing was deleted.'; });
+
+/* ---------- select & delete specific trips ---------- */
+const selBtn = $('sel-btn'), selDel = $('sel-del'), selAll = $('sel-all'), selMsg = $('sel-msg');
+let delTimer = null;
+function disarmDel(){ clearTimeout(delTimer); selDel.classList.remove('armed'); }
+function updateSelBar(){
+  disarmDel();
+  const n = selected.size;
+  selDel.disabled = n === 0;
+  selDel.textContent = n ? `Delete ${n} selected` : 'Delete selected';
+  selAll.textContent = n && n === trips.length ? 'Select none' : 'Select all';
+  selMsg.textContent = n ? '' : 'Tap trips to select them.';
+}
+function setSelecting(on){
+  selecting = on; selected.clear();
+  $('selbar').hidden = !on; selBtn.textContent = on ? 'Done' : 'Select';
+  updateSelBar(); renderList();
+}
+selBtn.addEventListener('click', () => {
+  if (!selecting && !trips.length){ exMsg.textContent = 'No recorded trips yet. The example trip cannot be deleted.'; return; }
+  setSelecting(!selecting);
+});
+selAll.addEventListener('click', () => {
+  if (selected.size === trips.length) selected.clear(); else trips.forEach(t => selected.add(t.id));
+  renderList(); updateSelBar();
+});
+selDel.addEventListener('click', () => {
+  const n = selected.size; if (!n) return;
+  if (!selDel.classList.contains('armed')){
+    selDel.classList.add('armed'); selDel.textContent = `Tap again to delete ${n}`;
+    selMsg.textContent = 'This cannot be undone.';
+    delTimer = setTimeout(updateSelBar, 6000);
+    return;
+  }
+  disarmDel();
+  trips = trips.filter(t => !selected.has(t.id));
+  saveTrips(trips);
+  if (current && selected.has(current.id)) current = null;
+  setSelecting(false);
+  show(current || trips[0] || SAMPLE);
+  exMsg.textContent = `Deleted ${n} trip${n>1?'s':''}.`;
+  if (!trips.length){ try{ localStorage.removeItem(KEY); }catch(e){} }
+});
 
 renderList();
 show(trips[0] || SAMPLE);

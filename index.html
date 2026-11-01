@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+<title>Bolo Travel Phrasebook</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#F2C230">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one-column phone app. Yellow station-signboard header, sticky language + category bar, phrase list; "Show" opens a full-screen signboard to hold up */
+:root{
+  --bg:#F3F4EF; --surface:#FFFFFF; --ink:#15171C; --muted:#5B606C; --line:#DADCD3;
+  --board:#F2C230; --board-ink:#13120E; --accent:#1D4C9E; --accent-soft:#E4EBF7; --accent-ink:#FFFFFF;
+  --font-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --font-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101217; --surface:#191C23; --ink:#ECEDF0; --muted:#9BA1AE; --line:#2A2E38;
+  --board:#E9BA22; --board-ink:#13120E; --accent:#86A9EE; --accent-soft:#1E2A42; --accent-ink:#0D1222; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101217; --surface:#191C23; --ink:#ECEDF0; --muted:#9BA1AE; --line:#2A2E38;
+  --board:#E9BA22; --board-ink:#13120E; --accent:#86A9EE; --accent-soft:#1E2A42; --accent-ink:#0D1222; color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{background:var(--bg)}
+body{color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.45;-webkit-tap-highlight-color:transparent}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.gutter{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:720px;margin:0 auto}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+/* signboard header */
+.sign{background:var(--board);color:var(--board-ink);padding-block:18px 16px;border-bottom:4px solid var(--board-ink)}
+.sign .wrap{display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sign h1{font-family:var(--font-display);font-weight:800;font-size:2.6rem;line-height:.9;letter-spacing:.04em;margin:0}
+.sign .scripts{font-size:.95rem;font-weight:700;letter-spacing:.02em;margin-top:6px;opacity:.85;word-spacing:.25em}
+.sign .tag{font-size:.8rem;text-transform:uppercase;letter-spacing:.12em;font-weight:700;border:2px solid var(--board-ink);padding:3px 8px;border-radius:4px;white-space:nowrap}
+
+/* sticky controls */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding-block:10px}
+.bar .wrap{display:flex;flex-direction:column;gap:10px}
+.rail{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-inline:-4px;padding-inline:4px}
+.rail::-webkit-scrollbar{display:none}
+.lang{flex:0 0 auto;border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:6px 12px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.15;min-width:84px}
+.lang b{font-size:1.05rem}
+.lang span{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.lang[aria-pressed="true"]{background:var(--board);border-color:var(--board-ink);color:var(--board-ink)}
+.lang[aria-pressed="true"] span{color:var(--board-ink)}
+.where{font-size:.85rem;color:var(--muted)}
+.where b{color:var(--ink)}
+.search{display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:0 12px}
+.search svg{flex:0 0 auto;color:var(--muted)}
+.search input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:inherit;padding:10px 0;outline:none}
+.cat{flex:0 0 auto;border:0;background:transparent;padding:6px 12px;border-radius:999px;font-size:.92rem;color:var(--muted);font-weight:700}
+.cat[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+
+/* list */
+main{padding-block:14px 32px}
+.group{font-family:var(--font-display);font-weight:700;font-size:1.05rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:18px 0 8px}
+.group:first-child{margin-top:4px}
+.list{display:flex;flex-direction:column;gap:10px}
+.phrase{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 14px 10px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.en{font-size:.85rem;color:var(--muted);font-weight:700}
+.tr{font-size:1.3rem;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+.nat{font-size:1.15rem;line-height:1.5;overflow-wrap:anywhere}
+.actions{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--line);background:transparent;border-radius:999px;padding:6px 12px;font-size:.88rem;font-weight:700}
+.btn.play{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.btn.star{margin-left:auto;padding:6px 9px}
+.btn.star[aria-pressed="true"]{color:var(--board-ink);background:var(--board);border-color:var(--board)}
+.empty{text-align:center;color:var(--muted);padding:40px 12px}
+
+.tips{margin-top:28px;border-top:1px solid var(--line);padding-top:16px;font-size:.88rem;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.tips h2{font-family:var(--font-display);font-size:1.05rem;text-transform:uppercase;letter-spacing:.1em;margin:0 0 4px;color:var(--ink)}
+.tips p{margin:0;max-width:62ch}
+
+/* show-card signboard */
+.board{position:fixed;inset:0;z-index:20;background:var(--board);color:var(--board-ink);display:flex;flex-direction:column;
+  padding:calc(env(safe-area-inset-top,0px) + 16px) max(20px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 20px) max(20px,env(safe-area-inset-left,0px))}
+.board .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.board .lbl{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.14em}
+.board .x{border:2px solid var(--board-ink);background:transparent;color:var(--board-ink);border-radius:999px;padding:6px 14px;font-weight:700}
+.board .body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:18px;border-top:4px solid var(--board-ink);border-bottom:4px solid var(--board-ink);margin-block:16px;padding-block:20px;min-height:0;overflow:auto}
+.board .big{font-size:clamp(2.2rem,11vw,4.6rem);font-weight:700;line-height:1.25;overflow-wrap:anywhere;text-wrap:balance}
+.board .sub{font-size:clamp(1.1rem,4.5vw,1.6rem);font-weight:700;opacity:.8}
+.board .eng{font-size:1rem}
+.board .bplay{align-self:flex-start;background:var(--board-ink);color:var(--board);border:0;border-radius:999px;padding:12px 20px;font-weight:700;display:inline-flex;gap:8px;align-items:center}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);z-index:30;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:.88rem;max-width:min(92vw,460px);text-align:center}
+@media (prefers-reduced-motion:no-preference){.board{animation:up .18s ease-out}@keyframes up{from{transform:translateY(12px);opacity:.6}}}
+</style>
+
+<header class="sign gutter">
+  <div class="wrap">
+    <div>
+      <h1>BOLO</h1>
+      <div class="scripts">बोलो ಬೋಲೋ బోలో ബോലോ বোলো</div>
+    </div>
+    <div class="tag">Works offline</div>
+  </div>
+</header>
+
+<div class="bar gutter">
+  <div class="wrap">
+    <div class="rail" id="langs" role="group" aria-label="Language"></div>
+    <div class="where" id="where"></div>
+    <label class="search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search in English, e.g. water, left, room" autocomplete="off">
+    </label>
+    <div class="rail" id="cats" role="group" aria-label="Category"></div>
+  </div>
+</div>
+
+<main class="gutter">
+  <div class="wrap">
+    <div id="out"></div>
+    <section class="tips">
+      <h2>Offline tips</h2>
+      <p>All phrases are stored on your phone once the app has loaded. Text, transliteration and Show work with no signal.</p>
+      <p>Play uses your phone's voices. For offline audio, open Settings → Google Text-to-speech → Install voice data, and download each language you need.</p>
+      <p>For sentences not in the list, download the language in Google Translate for offline typing.</p>
+    </section>
+  </div>
+</main>
+
+<div class="board" id="board" hidden role="dialog" aria-modal="true" aria-label="Show to the other person">
+  <div class="top"><span class="lbl" id="bLang"></span><button class="x" id="bClose">Close</button></div>
+  <div class="body">
+    <div class="big" id="bBig"></div>
+    <div class="sub" id="bSub"></div>
+    <div class="eng" id="bEng"></div>
+  </div>
+  <button class="bplay" id="bPlay"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Play aloud</button>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const LANGS=[
+ {k:"hi",name:"हिन्दी",en:"Hindi",tts:"hi-IN",where:"Delhi, Uttar Pradesh, Uttarakhand, Himachal, Rajasthan, MP, Bihar, Jharkhand, Haryana, Chhattisgarh. Also understood in most cities."},
+ {k:"kn",name:"ಕನ್ನಡ",en:"Kannada",tts:"kn-IN",where:"Karnataka (Bengaluru, Mysuru, Coorg, Hampi)"},
+ {k:"te",name:"తెలుగు",en:"Telugu",tts:"te-IN",where:"Andhra Pradesh, Telangana (Hyderabad, Tirupati, Vizag)"},
+ {k:"ml",name:"മലയാളം",en:"Malayalam",tts:"ml-IN",where:"Kerala (Kochi, Munnar, Alleppey, Trivandrum)"},
+ {k:"mr",name:"मराठी",en:"Marathi",tts:"mr-IN",where:"Maharashtra (Mumbai, Pune, Nashik). Hindi also widely understood."},
+ {k:"bn",name:"বাংলা",en:"Bengali",tts:"bn-IN",where:"West Bengal (Kolkata, Darjeeling), Tripura"}
+];
+const CATS=[["all","All"],["basic","Basics"],["auto","Auto & taxi"],["food","Food"],["stay","Stay"],["dir","Directions"],["shop","Shopping"],["money","Money"],["sos","Emergency"],["saved","Saved"]];
+// [cat, English, hi, hiT, kn, knT, te, teT, ml, mlT, mr, mrT, bn, bnT]
+const P=[
+["basic","Hello","नमस्ते","namaste","ನಮಸ್ಕಾರ","namaskaara","నమస్కారం","namaskaaram","നമസ്കാരം","namaskaaram","नमस्कार","namaskaar","নমস্কার","nomoshkar"],
+["basic","Thank you","धन्यवाद","dhanyavaad","ಧನ್ಯವಾದಗಳು","dhanyavaadagalu","ధన్యవాదాలు","dhanyavaadaalu","നന്ദി","nandi","धन्यवाद","dhanyavaad","ধন্যবাদ","dhonnobad"],
+["basic","Yes","हाँ","haan","ಹೌದು","haudu","అవును","avunu","അതെ","athe","हो","ho","হ্যাঁ","hyan"],
+["basic","No","नहीं","nahin","ಇಲ್ಲ","illa","కాదు","kaadu","അല്ല","alla","नाही","naahi","না","na"],
+["basic","Sorry / Excuse me","माफ़ कीजिए","maaf kijiye","ಕ್ಷಮಿಸಿ","kshamisi","క్షమించండి","kshaminchandi","ക്ഷമിക്കണം","kshamikkanam","माफ करा","maaf kara","মাফ করবেন","maaf korben"],
+["basic","I don't understand","मुझे समझ नहीं आया","mujhe samajh nahin aaya","ನನಗೆ ಅರ್ಥ ಆಗಲಿಲ್ಲ","nanage artha aagalilla","నాకు అర్థం కాలేదు","naaku artham kaaledu","എനിക്ക് മനസ്സിലായില്ല","enikku manassilaayilla","मला समजलं नाही","mala samajla naahi","আমি বুঝতে পারছি না","ami bujhte parchhi na"],
+["basic","Do you speak English?","क्या आप अंग्रेज़ी बोलते हैं?","kya aap angrezi bolte hain?","ನೀವು ಇಂಗ್ಲಿಷ್ ಮಾತಾಡ್ತೀರಾ?","neevu English maataadteeraa?","మీకు ఇంగ్లీష్ వచ్చా?","meeku English vachchaa?","ഇംഗ്ലീഷ് അറിയാമോ?","English ariyaamo?","तुम्हाला इंग्रजी येतं का?","tumhaala ingraji yeta ka?","আপনি কি ইংরেজি বলতে পারেন?","apni ki ingreji bolte paren?"],
+["basic","Please speak slowly","कृपया धीरे बोलिए","kripya dheere boliye","ದಯವಿಟ್ಟು ನಿಧಾನವಾಗಿ ಮಾತಾಡಿ","dayavittu nidhaanavaagi maataadi","దయచేసి నెమ్మదిగా మాట్లాడండి","dayachesi nemmadigaa maatlaadandi","ദയവായി പതുക്കെ സംസാരിക്കൂ","dayavaayi patukke samsaarikkoo","कृपया हळू बोला","kripaya halu bola","একটু আস্তে বলুন","ektu aaste bolun"],
+
+["auto","Please take me to this address","मुझे इस पते पर ले चलिए","mujhe is pate par le chaliye","ಈ ವಿಳಾಸಕ್ಕೆ ಕರೆದುಕೊಂಡು ಹೋಗಿ","ee vilaasakke karedukondu hogi","ఈ అడ్రస్‌కి తీసుకెళ్ళండి","ee address-ki teesukellandi","ഈ അഡ്രസ്സിലേക്ക് കൊണ്ടുപോകൂ","ee addressilekku kondupokoo","मला या पत्त्यावर घेऊन चला","mala ya pattyavar gheun chala","আমাকে এই ঠিকানায় নিয়ে চলুন","amake ei thikanay niye cholun"],
+["auto","How much to go there?","वहाँ जाने का कितना लगेगा?","vahaan jaane ka kitna lagega?","ಅಲ್ಲಿಗೆ ಹೋಗೋಕೆ ಎಷ್ಟು?","allige hogoke eshtu?","అక్కడికి వెళ్ళడానికి ఎంత?","akkadiki velladaaniki enta?","അവിടേക്ക് എത്രയാകും?","avidekku ethrayaakum?","तिथे जायला किती होतील?","tithe jaayla kiti hotil?","ওখানে যেতে কত লাগবে?","okhane jete koto lagbe?"],
+["auto","Too expensive, please reduce","बहुत महँगा है, थोड़ा कम कीजिए","bahut mahanga hai, thoda kam kijiye","ತುಂಬಾ ಜಾಸ್ತಿ, ಸ್ವಲ್ಪ ಕಡಿಮೆ ಮಾಡಿ","tumba jaasti, swalpa kadime maadi","చాలా ఎక్కువ, కొంచెం తగ్గించండి","chaalaa ekkuva, konchem tagginchandi","വളരെ കൂടുതലാണ്, കുറച്ച് കുറയ്ക്കൂ","valare kooduthalaanu, kurachu kuraykkoo","खूप जास्त आहे, थोडं कमी करा","khoop jaast aahe, thoda kami kara","খুব বেশি, একটু কম করুন","khub beshi, ektu kom korun"],
+["auto","Please use the meter","मीटर से चलिए","meter se chaliye","ಮೀಟರ್ ಹಾಕಿ","meter haaki","మీటర్ వేయండి","meter veyandi","മീറ്റർ ഇടൂ","meter idoo","मीटरने चला","meterne chala","মিটারে চলুন","mitare cholun"],
+["auto","Stop here","यहाँ रोकिए","yahaan rokiye","ಇಲ್ಲಿ ನಿಲ್ಲಿಸಿ","illi nillisi","ఇక్కడ ఆపండి","ikkada aapandi","ഇവിടെ നിർത്തൂ","ivide nirtthoo","इथे थांबा","ithe thaamba","এখানে থামুন","ekhane thamun"],
+["auto","Go straight","सीधा चलिए","seedha chaliye","ನೇರವಾಗಿ ಹೋಗಿ","neeravaagi hogi","నేరుగా వెళ్ళండి","nerugaa vellandi","നേരെ പോകൂ","nere pokoo","सरळ चला","saral chala","সোজা চলুন","shoja cholun"],
+["auto","Turn left","बाएँ मुड़िए","baayen mudiye","ಎಡಕ್ಕೆ ತಿರುಗಿ","edakke tirugi","ఎడమ వైపు తిరగండి","edama vaipu tiragandi","ഇടത്തോട്ട് തിരിയൂ","idatthottu thiriyoo","डावीकडे वळा","daavikade vala","বাঁদিকে ঘুরুন","bandike ghurun"],
+["auto","Turn right","दाएँ मुड़िए","daayen mudiye","ಬಲಕ್ಕೆ ತಿರುಗಿ","balakke tirugi","కుడి వైపు తిరగండి","kudi vaipu tiragandi","വലത്തോട്ട് തിരിയൂ","valatthottu thiriyoo","उजवीकडे वळा","ujavikade vala","ডানদিকে ঘুরুন","dandike ghurun"],
+
+["food","Is this vegetarian?","क्या यह शाकाहारी है?","kya yeh shakahari hai?","ಇದು ಸಸ್ಯಾಹಾರಿನಾ?","idu sasyaahaarinaa?","ఇది శాకాహారమా?","idi shaakaahaaramaa?","ഇത് വെജിറ്റേറിയൻ ആണോ?","ithu vegetarian aano?","हे शाकाहारी आहे का?","he shaakaahaari aahe ka?","এটা কি নিরামিষ?","eta ki niramish?"],
+["food","Less spicy, please","कम तीखा बनाइए","kam teekha banaiye","ಖಾರ ಕಡಿಮೆ ಮಾಡಿ","khaara kadime maadi","కారం తక్కువ వేయండి","kaaram takkuva veyandi","എരിവ് കുറച്ച് മതി","erivu kurachu mathi","कमी तिखट करा","kami tikhat kara","ঝাল কম দেবেন","jhaal kom deben"],
+["food","Drinking water, please","पीने का पानी दीजिए","peene ka paani dijiye","ಕುಡಿಯೋಕೆ ನೀರು ಕೊಡಿ","kudiyoke neeru kodi","తాగడానికి నీళ్ళు ఇవ్వండి","taagadaaniki neellu ivvandi","കുടിക്കാൻ വെള്ളം തരൂ","kudikkaan vellam tharoo","प्यायला पाणी द्या","pyaayla paani dya","খাবার জল দিন","khabar jol din"],
+["food","The bill, please","बिल दीजिए","bill dijiye","ಬಿಲ್ ಕೊಡಿ","bill kodi","బిల్ ఇవ్వండి","bill ivvandi","ബിൽ തരൂ","bill tharoo","बिल द्या","bill dya","বিলটা দিন","bill-ta din"],
+["food","Very tasty!","बहुत स्वादिष्ट है!","bahut swaadisht hai!","ತುಂಬಾ ರುಚಿಯಾಗಿದೆ!","tumba ruchiyaagide!","చాలా రుచిగా ఉంది!","chaalaa ruchigaa undi!","നല്ല രുചിയുണ്ട്!","nalla ruchiyundu!","खूप छान झालंय!","khoop chhaan zhaalay!","খুব সুস্বাদু!","khub shushwadu!"],
+
+["stay","Is a room available?","क्या कमरा मिलेगा?","kya kamra milega?","ರೂಮ್ ಸಿಗುತ್ತಾ?","room siguttaa?","రూమ్ దొరుకుతుందా?","room dorukutundaa?","റൂം കിട്ടുമോ?","room kittumo?","खोली मिळेल का?","kholi milel ka?","ঘর পাওয়া যাবে?","ghor paowa jabe?"],
+["stay","How much for one night?","एक रात का कितना है?","ek raat ka kitna hai?","ಒಂದು ರಾತ್ರಿಗೆ ಎಷ್ಟು?","ondu raatrige eshtu?","ఒక రాత్రికి ఎంత?","oka raatriki enta?","ഒരു രാത്രിക്ക് എത്രയാണ്?","oru raathrikku ethrayaanu?","एका रात्रीचे किती?","eka raatriche kiti?","এক রাতের ভাড়া কত?","ek raater bhara koto?"],
+["stay","Is there hot water?","क्या गरम पानी है?","kya garam paani hai?","ಬಿಸಿ ನೀರು ಇದೆಯಾ?","bisi neeru ideyaa?","వేడి నీళ్ళు ఉన్నాయా?","vedi neellu unnaayaa?","ചൂടുവെള്ളം ഉണ്ടോ?","choodu vellam undo?","गरम पाणी आहे का?","garam paani aahe ka?","গরম জল আছে?","gorom jol achhe?"],
+["stay","What time is checkout?","चेकआउट कितने बजे है?","checkout kitne baje hai?","ಚೆಕ್‌ಔಟ್ ಎಷ್ಟು ಗಂಟೆಗೆ?","checkout eshtu gantege?","చెక్‌అవుట్ ఎన్ని గంటలకి?","checkout enni gantalaki?","ചെക്ക്ഔട്ട് എത്ര മണിക്കാണ്?","checkout ethra manikkaanu?","चेकआउट किती वाजता आहे?","checkout kiti vaajta aahe?","চেকআউট কটায়?","checkout kotay?"],
+
+["dir","Where is the toilet?","टॉयलेट कहाँ है?","toilet kahaan hai?","ಟಾಯ್ಲೆಟ್ ಎಲ್ಲಿದೆ?","toilet ellide?","టాయిలెట్ ఎక్కడ ఉంది?","toilet ekkada undi?","ടോയ്‌ലറ്റ് എവിടെയാണ്?","toilet evideyaanu?","टॉयलेट कुठे आहे?","toilet kuthe aahe?","টয়লেট কোথায়?","toilet kothay?"],
+["dir","Where is the railway station?","रेलवे स्टेशन कहाँ है?","railway station kahaan hai?","ರೈಲ್ವೆ ಸ್ಟೇಷನ್ ಎಲ್ಲಿದೆ?","railway station ellide?","రైల్వే స్టేషన్ ఎక్కడ ఉంది?","railway station ekkada undi?","റെയിൽവേ സ്റ്റേഷൻ എവിടെയാണ്?","railway station evideyaanu?","रेल्वे स्टेशन कुठे आहे?","railway station kuthe aahe?","রেলস্টেশন কোথায়?","rail station kothay?"],
+["dir","Where is the bus stand?","बस स्टैंड कहाँ है?","bus stand kahaan hai?","ಬಸ್ ಸ್ಟ್ಯಾಂಡ್ ಎಲ್ಲಿದೆ?","bus stand ellide?","బస్ స్టాండ్ ఎక్కడ ఉంది?","bus stand ekkada undi?","ബസ് സ്റ്റാൻഡ് എവിടെയാണ്?","bus stand evideyaanu?","बस स्टँड कुठे आहे?","bus stand kuthe aahe?","বাস স্ট্যান্ড কোথায়?","bus stand kothay?"],
+["dir","How far is it?","कितनी दूर है?","kitni door hai?","ಎಷ್ಟು ದೂರ?","eshtu doora?","ఎంత దూరం?","enta dooram?","എത്ര ദൂരമുണ്ട്?","ethra dooramundu?","किती लांब आहे?","kiti laamb aahe?","কত দূর?","koto door?"],
+
+["shop","How much is this?","यह कितने का है?","yeh kitne ka hai?","ಇದು ಎಷ್ಟು?","idu eshtu?","ఇది ఎంత?","idi enta?","ഇതിന് എത്രയാണ്?","ithinu ethrayaanu?","हे कितीला आहे?","he kitila aahe?","এটার দাম কত?","etar daam koto?"],
+["shop","Can I pay by UPI?","क्या UPI से पेमेंट कर सकते हैं?","kya UPI se payment kar sakte hain?","UPI ಮಾಡಬಹುದಾ?","UPI maadabahudaa?","UPI చేయొచ్చా?","UPI cheyochchaa?","UPI ചെയ്യാമോ?","UPI cheyyaamo?","UPI ने पैसे देता येतील का?","UPI ne paise deta yetil ka?","UPI-তে দেওয়া যাবে?","UPI-te deowa jabe?"],
+
+["money","₹10","दस","das","ಹತ್ತು","hattu","పది","padi","പത്ത്","patthu","दहा","daha","দশ","dosh"],
+["money","₹20","बीस","bees","ಇಪ್ಪತ್ತು","ippattu","ఇరవై","iravai","ഇരുപത്","irupathu","वीस","vees","কুড়ি","kuri"],
+["money","₹50","पचास","pachaas","ಐವತ್ತು","aivattu","యాభై","yaabhai","അമ്പത്","ampathu","पन्नास","pannaas","পঞ্চাশ","ponchash"],
+["money","₹100","सौ","sau","ನೂರು","nooru","వంద","vanda","നൂറ്","nooru","शंभर","shambhar","একশো","eksho"],
+["money","₹200","दो सौ","do sau","ಇನ್ನೂರು","innooru","రెండు వందలు","rendu vandalu","ഇരുനൂറ്","irunooru","दोनशे","donshe","দুশো","dusho"],
+["money","₹500","पाँच सौ","paanch sau","ಐನೂರು","ainooru","ఐదు వందలు","aidu vandalu","അഞ്ഞൂറ്","anjooru","पाचशे","paachshe","পাঁচশো","panchsho"],
+
+["sos","Help!","मदद कीजिए!","madad kijiye!","ಸಹಾಯ ಮಾಡಿ!","sahaaya maadi!","సహాయం చేయండి!","sahaayam cheyandi!","സഹായിക്കൂ!","sahaayikkoo!","मदत करा!","madat kara!","সাহায্য করুন!","shahajjo korun!"],
+["sos","I need a doctor","मुझे डॉक्टर चाहिए","mujhe doctor chahiye","ನನಗೆ ಡಾಕ್ಟರ್ ಬೇಕು","nanage doctor beku","నాకు డాక్టర్ కావాలి","naaku doctor kaavaali","എനിക്ക് ഡോക്ടറെ വേണം","enikku doctore venam","मला डॉक्टर हवा आहे","mala doctor hava aahe","আমার ডাক্তার লাগবে","amar daktar lagbe"],
+["sos","Please call the police","पुलिस को बुलाइए","police ko bulaiye","ಪೊಲೀಸರನ್ನು ಕರೆಯಿರಿ","poleesarannu kareyiri","పోలీసులను పిలవండి","poleesulanu pilavandi","പോലീസിനെ വിളിക്കൂ","poleesine vilikkoo","पोलिसांना बोलवा","polisaanna bolva","পুলিশ ডাকুন","pulish dakun"],
+["sos","Where is the hospital?","अस्पताल कहाँ है?","aspataal kahaan hai?","ಆಸ್ಪತ್ರೆ ಎಲ್ಲಿದೆ?","aaspatre ellide?","హాస్పిటల్ ఎక్కడ ఉంది?","hospital ekkada undi?","ആശുപത്രി എവിടെയാണ്?","aashupathri evideyaanu?","दवाखाना कुठे आहे?","davaakhaana kuthe aahe?","হাসপাতাল কোথায়?","haspatal kothay?"],
+["sos","I am lost","मैं रास्ता भूल गया हूँ","main raasta bhool gaya hoon","ನಾನು ದಾರಿ ತಪ್ಪಿದ್ದೇನೆ","naanu daari tappiddene","నేను దారి తప్పిపోయాను","nenu daari tappipoyaanu","എനിക്ക് വഴി തെറ്റി","enikku vazhi thetti","मी रस्ता चुकलो आहे","mi rasta chuklo aahe","আমি রাস্তা হারিয়ে ফেলেছি","ami rasta hariye phelechhi"]
+];
+const ORDER=LANGS.map(l=>l.k);
+const phrases=P.map((r,i)=>{const t={};ORDER.forEach((k,j)=>t[k]=[r[2+j*2],r[3+j*2]]);return{id:i,cat:r[0],en:r[1],t}});
+
+const store={get(k,d){try{const v=localStorage.getItem("bolo."+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+  set(k,v){try{localStorage.setItem("bolo."+k,JSON.stringify(v))}catch(e){}}};
+const S={lang:store.get("lang","hi"),cat:"all",q:"",saved:new Set(store.get("saved",[]))};
+if(!ORDER.includes(S.lang))S.lang="hi";
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ICON={
+ play:'<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+ show:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+ star:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>'
+};
+
+function renderLangs(){
+  $("langs").innerHTML=LANGS.map(l=>`<button class="lang" data-lang="${l.k}" aria-pressed="${l.k===S.lang}"><b lang="${l.k}">${l.name}</b><span>${l.en}</span></button>`).join("");
+  const L=LANGS.find(l=>l.k===S.lang);
+  $("where").innerHTML=`<b>${L.en}</b> is spoken in ${esc(L.where)}`;
+}
+function renderCats(){
+  $("cats").innerHTML=CATS.map(([k,n])=>`<button class="cat" data-cat="${k}" aria-pressed="${k===S.cat}">${n}${k==="saved"&&S.saved.size?` (${S.saved.size})`:""}</button>`).join("");
+}
+function card(p){
+  const [nat,tr]=p.t[S.lang];const on=S.saved.has(p.id);
+  return `<article class="phrase"><div class="en">${esc(p.en)}</div><div class="tr">${esc(tr)}</div><div class="nat" lang="${S.lang}">${esc(nat)}</div>
+  <div class="actions"><button class="btn play" data-play="${p.id}">${ICON.play}Play</button><button class="btn" data-show="${p.id}">${ICON.show}Show</button>
+  <button class="btn star" data-star="${p.id}" aria-pressed="${on}" aria-label="${on?"Remove from saved":"Save phrase"}">${ICON.star}</button></div></article>`;
+}
+function renderList(){
+  const q=S.q.trim().toLowerCase();
+  let list=phrases.filter(p=>S.cat==="all"||(S.cat==="saved"?S.saved.has(p.id):p.cat===S.cat));
+  if(q)list=list.filter(p=>p.en.toLowerCase().includes(q)||p.t[S.lang][1].toLowerCase().includes(q));
+  if(!list.length){$("out").innerHTML=`<p class="empty">${S.cat==="saved"&&!q?"No saved phrases yet. Tap the star on any phrase to keep it here.":"No phrase matches “"+esc(S.q)+"”. Try a simpler word like water, room or left."}</p>`;return}
+  if(S.cat==="all"&&!q){
+    $("out").innerHTML=CATS.filter(c=>!["all","saved"].includes(c[0])).map(([k,n])=>{
+      const g=list.filter(p=>p.cat===k);return g.length?`<h2 class="group">${n}</h2><div class="list">${g.map(card).join("")}</div>`:""}).join("");
+  } else $("out").innerHTML=`<div class="list">${list.map(card).join("")}</div>`;
+}
+function render(){renderLangs();renderCats();renderList()}
+
+let toastT;function toast(m){const t=$("toast");t.textContent=m;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,3800)}
+
+function speak(id){
+  const p=phrases[id];const L=LANGS.find(l=>l.k===S.lang);
+  if(!("speechSynthesis" in window)){toast("This browser can't play audio. Show the text instead.");return}
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(p.t[S.lang][0]);u.lang=L.tts;u.rate=.85;
+    const voices=speechSynthesis.getVoices();
+    const v=voices.find(v=>v.lang&&v.lang.replace("_","-").toLowerCase()===L.tts.toLowerCase())||voices.find(v=>v.lang&&v.lang.toLowerCase().startsWith(L.k));
+    if(v)u.voice=v;else if(voices.length)toast(`No ${L.en} voice found. Install it in Settings → Google Text-to-speech, or use Show.`);
+    u.onerror=()=>toast(`Couldn't play ${L.en}. Install the voice in Settings → Google Text-to-speech.`);
+    speechSynthesis.speak(u);
+  }catch(e){toast("Audio isn't available here. Use Show instead.")}
+}
+let boardId=null,lastFocus=null;
+function show(id){
+  const p=phrases[id];const L=LANGS.find(l=>l.k===S.lang);boardId=id;lastFocus=document.activeElement;
+  $("bLang").textContent=L.en+" · "+L.name;$("bBig").textContent=p.t[S.lang][0];$("bBig").lang=S.lang;
+  $("bSub").textContent=p.t[S.lang][1];$("bEng").textContent=p.en;$("board").hidden=false;$("bClose").focus();
+  try{navigator.wakeLock&&navigator.wakeLock.request("screen").then(w=>window._wl=w).catch(()=>{})}catch(e){}
+}
+function hide(){$("board").hidden=true;boardId=null;try{window._wl&&window._wl.release()}catch(e){};lastFocus&&lastFocus.focus&&lastFocus.focus()}
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  if(b.dataset.lang){S.lang=b.dataset.lang;store.set("lang",S.lang);render()}
+  else if(b.dataset.cat){S.cat=b.dataset.cat;renderCats();renderList()}
+  else if(b.dataset.play)speak(+b.dataset.play);
+  else if(b.dataset.show)show(+b.dataset.show);
+  else if(b.dataset.star){const id=+b.dataset.star;S.saved.has(id)?S.saved.delete(id):S.saved.add(id);store.set("saved",[...S.saved]);renderCats();renderList()}
+});
+$("q").addEventListener("input",e=>{S.q=e.target.value;renderList()});
+$("bClose").addEventListener("click",hide);
+$("bPlay").addEventListener("click",()=>boardId!=null&&speak(boardId));
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("board").hidden)hide()});
+if("speechSynthesis" in window){try{speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{}}catch(e){}}
+render();
+
+// Offline support when hosted (GitHub Pages). Silently skipped where service workers aren't allowed.
+try{if("serviceWorker" in navigator&&location.protocol==="https:"&&!location.hostname.endsWith("claude.ai")){navigator.serviceWorker.register("sw.js").catch(()=>{})}}catch(e){}
+</script>

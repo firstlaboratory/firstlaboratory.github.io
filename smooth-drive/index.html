@@ -273,10 +273,10 @@ let trips = loadTrips();
 function migrate(list){
   let changed = false;
   list.forEach(t => {
-    if (t.v2 || !t.pts || t.pts.length < 2) return;
+    if ((t.ver || 0) >= 3 || !t.pts || t.pts.length < 2) return;
     t.events = classify(t.events, t.pts);
     t.traffic = trafficOf(t.pts) || t.traffic;
-    t.v2 = true; changed = true;
+    t.ver = 3; changed = true;
   });
   return changed;
 }
@@ -450,7 +450,7 @@ function importPending(){
         const d = new Date(raw.start);
         last = { id:raw.id, name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
           source:'live', start:raw.start, durS:raw.durS, distM: raw.distM > 50 ? raw.distM : null, trace:an.trace,
-          events:classify(an.events, pts), v2:true, traffic: trafficOf(pts),
+          events:classify(an.events, pts), ver:3, traffic: trafficOf(pts),
           pts: pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
         trips.push(last);
       }
@@ -562,7 +562,7 @@ function stop(){
   const d = new Date(r.start);
   const trip = { id:String(r.start), name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
     source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.pts),
-    v2:true, traffic: trafficOf(r.pts), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
+    ver:3, traffic: trafficOf(r.pts), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
   trips.unshift(trip); saveTrips(trips); show(trip); renderList();
 }
 
@@ -677,6 +677,7 @@ function distM(a, b){
   const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
+const BREAK = 300; // seconds
 function trafficOf(pts){
   if (!pts || pts.length < 10) return null;
   let slow = 0, cur = null; const stops = [];
@@ -693,10 +694,30 @@ function trafficOf(pts){
     else if (cur){ close(cur); cur = null; }
   }
   if (cur) close(cur);
-  const real = stops.filter(s => s.dur >= 20);
+  // Breaks: 5+ minutes in one place (shop, tea, parking) are not traffic.
+  // Group nearby stops first, since walking around inside a shop splits one visit into pieces.
+  const groups = [];
+  stops.forEach(st => {
+    const g = groups[groups.length-1];
+    if (g && st.t - g.end < 90 && distM(g.first, st) < 150){ g.items.push(st); g.end = st.t + st.dur; }
+    else groups.push({ first:st, items:[st], end:st.t + st.dur });
+  });
+  const breaks = [], kept = [];
+  groups.forEach(g => {
+    const span = g.end - g.first.t;
+    if (span >= BREAK) breaks.push({ t:g.first.t, dur:Math.round(span), lat:g.first.lat, lon:g.first.lon });
+    else kept.push(...g.items);
+  });
+  const inBreak = t => breaks.some(br => t >= br.t - 5 && t <= br.t + br.dur + 5);
+  for (let i=1;i<pts.length;i++){
+    const p = pts[i], gap = p.t - pts[i-1].t;
+    if (p.v < SLOW && inBreak(p.t) && !(gap > 30 && distM(pts[i-1], p) > 60)) slow -= Math.min(10, gap);
+  }
+  slow = Math.max(0, slow);
+  const real = kept.filter(s => s.dur >= 20);
   const stopped = Math.min(Math.round(slow), real.reduce((a,s)=>a+s.dur, 0));
   const a = pts[0], b = pts[pts.length-1];
-  return { slowS:Math.round(slow), stoppedS:stopped, stops:real, from:{lat:a.lat,lon:a.lon}, to:{lat:b.lat,lon:b.lon} };
+  return { slowS:Math.round(slow), stoppedS:stopped, stops:real, breaks, from:{lat:a.lat,lon:a.lon}, to:{lat:b.lat,lon:b.lon} };
 }
 
 /* example commutes so the insights have something to show before you record */
@@ -733,7 +754,8 @@ function showTraffic(trip){
   } else {
     $('t-body').hidden = false;
     $('t-stuck').textContent = mmss(tf.slowS); $('tr-h').textContent = 'stuck in traffic';
-    const crawl = Math.max(0, tf.slowS - tf.stoppedS), move = Math.max(0, trip.durS - tf.slowS);
+    const brkS = (tf.breaks || []).reduce((a,b) => a + b.dur, 0);
+    const crawl = Math.max(0, tf.slowS - tf.stoppedS), move = Math.max(0, trip.durS - brkS - tf.slowS);
     const segs = $('t-split').children, tot = Math.max(1, move + crawl + tf.stoppedS);
     [move, crawl, tf.stoppedS].forEach((v,i) => segs[i].style.width = (v/tot*100)+'%');
     $('t-legend').innerHTML = `<span><i style="background:var(--good)"></i>Moving ${minsTxt(move)}</span><span><i style="background:var(--warn)"></i>Crawling ${minsTxt(crawl)}</span><span><i style="background:var(--crit)"></i>Stopped ${minsTxt(tf.stoppedS)}</span>`;
@@ -741,9 +763,13 @@ function showTraffic(trip){
     $('t-long').textContent = tf.stops.length ? mmss(Math.max(...tf.stops.map(s=>s.dur))) : '–';
     $('t-speed').textContent = trip.distM ? Math.round(trip.distM/1000 / (trip.durS/3600)) : '–';
     if (!tf.stops.length) list.innerHTML = '<li><span></span><span class="empty">No stops longer than 20 seconds. Clear roads.</span><span></span></li>';
-    tf.stops.forEach(s => {
+    const rows = [...tf.stops.map(s => ({...s, brk:false})), ...(tf.breaks || []).map(s => ({...s, brk:true}))].sort((a,b) => a.t - b.t);
+    if (rows.length) list.innerHTML = '';
+    rows.forEach(s => {
       const li = document.createElement('li');
-      li.innerHTML = `<span class="num note">${mmss(s.t)}</span><span>Held up for <b class="num">${mmss(s.dur)}</b></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`;
+      li.innerHTML = s.brk
+        ? `<span class="num note">${mmss(s.t)}</span><span>Break, <b class="num">${mmss(s.dur)}</b> <span class="note">· not counted as traffic</span></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`
+        : `<span class="num note">${mmss(s.t)}</span><span>Held up for <b class="num">${mmss(s.dur)}</b></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`;
       list.appendChild(li);
     });
   }
@@ -858,8 +884,9 @@ $('ex-trips').addEventListener('click', () => {
 });
 $('ex-stops').addEventListener('click', () => {
   if (!needTrips()) return;
-  const rows = [['trip_date','trip_start','stop_time','minutes_into_trip','duration_s','latitude','longitude','map_link']];
-  trips.forEach(t => (t.traffic?.stops || []).forEach(s => rows.push([dstr(t.start), tstr(t.start), tstr(t.start + s.t*1000), (s.t/60).toFixed(1), s.dur, s.lat, s.lon, mapLink(s)])));
+  const rows = [['trip_date','trip_start','stop_time','minutes_into_trip','duration_s','type','latitude','longitude','map_link']];
+  trips.forEach(t => [...(t.traffic?.stops || []).map(s => [s,'traffic']), ...(t.traffic?.breaks || []).map(s => [s,'break'])].sort((a,b) => a[0].t - b[0].t)
+    .forEach(([s,k]) => rows.push([dstr(t.start), tstr(t.start), tstr(t.start + s.t*1000), (s.t/60).toFixed(1), s.dur, k, s.lat, s.lon, mapLink(s)])));
   if (rows.length === 1){ exMsg.textContent = 'No stops recorded yet. Stops need location access during a trip.'; return; }
   download(`smooth-drive-stops-${stamp()}.csv`, csv(rows), 'text/csv');
 });

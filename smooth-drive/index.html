@@ -275,7 +275,7 @@ function migrate(list){
   list.forEach(t => {
     if ((t.ver || 0) >= 3 || !t.pts || t.pts.length < 2) return;
     t.events = classify(t.events, t.pts);
-    t.traffic = trafficOf(t.pts) || t.traffic;
+    t.traffic = trafficOf(t.pts, t.walk) || t.traffic;
     t.ver = 3; changed = true;
   });
   return changed;
@@ -450,7 +450,7 @@ function importPending(){
         const d = new Date(raw.start);
         last = { id:raw.id, name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
           source:'live', start:raw.start, durS:raw.durS, distM: raw.distM > 50 ? raw.distM : null, trace:an.trace,
-          events:classify(an.events, pts), ver:3, traffic: trafficOf(pts),
+          events:classify(an.events, pts), ver:3, walk:raw.walk, traffic: trafficOf(pts, raw.walk),
           pts: pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
         trips.push(last);
       }
@@ -480,7 +480,7 @@ async function start(){
       if (r !== 'granted'){ showMsg('Motion access was declined. Allow motion and orientation access in your browser settings, then try again.'); return; }
     }
   }catch(e){ blocked(); return; }
-  rec = { an:new Analyzer(), t0:performance.now(), pausedMs:0, pauseAt:null, start:Date.now(), grav:null, speeds:[], pts:[], dist:0, lastPos:null, got:0, geo:null };
+  rec = { an:new Analyzer(), wd:new WalkDetector(), t0:performance.now(), pausedMs:0, pauseAt:null, start:Date.now(), grav:null, speeds:[], pts:[], dist:0, lastPos:null, got:0, geo:null };
   window.addEventListener('devicemotion', onMotion);
   if (navigator.geolocation){
     try{ rec.geo = navigator.geolocation.watchPosition(onPos, ()=>{}, { enableHighAccuracy:true, maximumAge:0 }); }catch(e){}
@@ -512,6 +512,7 @@ function onMotion(e){
   if (la && la.x !== null){ lx = la.x; ly = la.y; lz = la.z; }
   else { lx = ig.x-rec.grav.x; ly = ig.y-rec.grav.y; lz = ig.z-rec.grav.z; }
   const dot = lx*ux + ly*uy + lz*uz;
+  rec.wd.push(t, dot);
   // horizontal part only, so bumps don't count
   const g = rec.an.pushVec(t, lx-dot*ux, ly-dot*uy, lz-dot*uz);
   rec.gNow = g;
@@ -562,7 +563,7 @@ function stop(){
   const d = new Date(r.start);
   const trip = { id:String(r.start), name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
     source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.pts),
-    ver:3, traffic: trafficOf(r.pts), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
+    ver:3, walk:r.wd.walk, traffic: trafficOf(r.pts, r.wd.walk), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
   trips.unshift(trip); saveTrips(trips); show(trip); renderList();
 }
 
@@ -678,7 +679,22 @@ function distM(a, b){
   return 2*R*Math.asin(Math.sqrt(h));
 }
 const BREAK = 300; // seconds
-function trafficOf(pts){
+const WALK_RMS = 1.2; // m/s², vertical bounce of footsteps; riding or idling stays well below
+function WalkDetector(){ this.sec = -1; this.sum = 0; this.n = 0; this.walk = []; }
+WalkDetector.prototype.push = function(t, vert){
+  const sec = Math.floor(t);
+  if (sec !== this.sec){
+    if (this.n >= 10 && Math.sqrt(this.sum / this.n) > WALK_RMS){
+      const last = this.walk[this.walk.length-1];
+      if (last && this.sec - last[1] <= 3) last[1] = this.sec + 1; else this.walk.push([this.sec, this.sec + 1]);
+    }
+    this.sec = sec; this.sum = 0; this.n = 0;
+  }
+  this.sum += vert*vert; this.n++;
+};
+const walkedSeconds = (walk, t0, t1) => (walk || []).reduce((a,[s,e]) => a + Math.max(0, Math.min(e, t1) - Math.max(s, t0)), 0);
+
+function trafficOf(pts, walk){
   if (!pts || pts.length < 10) return null;
   let slow = 0, cur = null; const stops = [];
   const close = c => {
@@ -705,7 +721,10 @@ function trafficOf(pts){
   const breaks = [], kept = [];
   groups.forEach(g => {
     const span = g.end - g.first.t;
-    if (span >= BREAK) breaks.push({ t:g.first.t, dur:Math.round(span), lat:g.first.lat, lon:g.first.lon });
+    // A long stop is a break only if you got off and walked; standing in a jam stays traffic.
+    // Trips recorded before walking detection (walk undefined) fall back to length alone.
+    const walked = walk === undefined || walkedSeconds(walk, g.first.t - 30, g.end + 30) >= 30;
+    if (span >= BREAK && walked) breaks.push({ t:g.first.t, dur:Math.round(span), lat:g.first.lat, lon:g.first.lon });
     else kept.push(...g.items);
   });
   const inBreak = t => breaks.some(br => t >= br.t - 5 && t <= br.t + br.dur + 5);
@@ -768,7 +787,7 @@ function showTraffic(trip){
     rows.forEach(s => {
       const li = document.createElement('li');
       li.innerHTML = s.brk
-        ? `<span class="num note">${mmss(s.t)}</span><span>Break, <b class="num">${mmss(s.dur)}</b> <span class="note">· not counted as traffic</span></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`
+        ? `<span class="num note">${mmss(s.t)}</span><span>Break, <b class="num">${mmss(s.dur)}</b> <span class="note">· you walked, so not counted as traffic</span></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`
         : `<span class="num note">${mmss(s.t)}</span><span>Held up for <b class="num">${mmss(s.dur)}</b></span><a href="${mapLink(s)}" target="_blank" rel="noopener">Map ↗</a>`;
       list.appendChild(li);
     });

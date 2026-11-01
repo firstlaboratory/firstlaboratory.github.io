@@ -270,18 +270,43 @@ function saveTrips(t){
   }
 }
 let trips = loadTrips();
+function migrate(list){
+  let changed = false;
+  list.forEach(t => {
+    if (t.v2 || !t.pts || t.pts.length < 2) return;
+    t.events = classify(t.events, t.pts);
+    t.traffic = trafficOf(t.pts) || t.traffic;
+    t.v2 = true; changed = true;
+  });
+  return changed;
+}
 
 /* ---------- analyzer: raw horizontal accel (m/s²) -> smoothed g, events ---------- */
 function Analyzer(){
-  this.f = 0; this.lastT = null; this.trace = []; this.nextStore = 0;
+  this.f = 0; this.vx = 0; this.vy = 0; this.vz = 0; this.lastT = null; this.trace = []; this.nextStore = 0;
   this.events = []; this.cur = null;
 }
-Analyzer.prototype.push = function(t, a){
+Analyzer.prototype.alpha = function(t){
   if (this.lastT === null){ this.lastT = t; }
   const dt = Math.max(0, Math.min(0.5, t - this.lastT)); this.lastT = t;
-  const alpha = 1 - Math.exp(-dt / TAU);
-  this.f += alpha * (a / G - this.f);
-  const g = this.f;
+  return 1 - Math.exp(-dt / TAU);
+};
+// scalar magnitude in m/s² (old data / no direction available)
+Analyzer.prototype.push = function(t, a){
+  this.f += this.alpha(t) * (a / G - this.f);
+  return this.step(t, this.f);
+};
+// horizontal acceleration vector in m/s²: smoothing the components first lets
+// engine and road vibration cancel out instead of adding up as false g
+Analyzer.prototype.pushVec = function(t, x, y, z){
+  const k = this.alpha(t);
+  this.vx += k*(x - this.vx); this.vy += k*(y - this.vy); this.vz += k*(z - this.vz);
+  this.f = Math.hypot(this.vx, this.vy, this.vz) / G;
+  return this.step(t, this.f);
+};
+// already-smoothed g (recorded by the Android app)
+Analyzer.prototype.pushG = function(t, g){ this.alpha(t); this.f = g; return this.step(t, g); };
+Analyzer.prototype.step = function(t, g){
   if (t >= this.nextStore){ this.trace.push(+g.toFixed(3)); this.nextStore = this.trace.length / STORE_HZ; }
   if (!this.cur && g >= MOD){ this.cur = { t0:t, tp:t, peak:g }; }
   else if (this.cur){
@@ -297,7 +322,20 @@ Analyzer.prototype.close = function(t){
 Analyzer.prototype.finish = function(t){ if (this.cur) this.close(t); };
 
 /* event type from GPS speed change around the peak */
+const MOVING = 2.5; // m/s, 9 km/h: below this, jolts are the phone being handled, not driving
 function classify(events, speeds){
+  if (speeds && speeds.length >= 2){
+    events = events.filter(e => {
+      const w = speeds.filter(s => s.t >= e.t - 4 && s.t <= e.t + 2);
+      if (w.length >= 2) return Math.max(...w.map(s => s.v)) >= MOVING;
+      // inside a GPS dropout: judge by how far the phone got across the gap
+      let i = speeds.findIndex(s => s.t > e.t);
+      if (i <= 0) return true;
+      const p = speeds[i-1], q = speeds[i];
+      if (p.lat === undefined || q.t <= p.t) return true;
+      return distM(p, q) / (q.t - p.t) >= MOVING;
+    });
+  }
   for (const e of events){
     if (!speeds || speeds.length < 2){ e.type = 'jolt'; continue; }
     const a = speeds.filter(s => s.t >= e.t - 2.5 && s.t <= e.t + 1.5);
@@ -406,13 +444,13 @@ function importPending(){
     try{
       if (!trips.some(t => t.id === raw.id)){
         const an = new Analyzer(), T = raw.acc.t, H = raw.acc.h;
-        for (let i=0;i<T.length;i++) an.push(T[i], H[i]);
+        for (let i=0;i<T.length;i++) raw.acc.g ? an.pushG(T[i], H[i]) : an.push(T[i], H[i]);
         an.finish(raw.durS);
         const pts = raw.pts.map(p => ({ t:p[0], lat:p[1], lon:p[2], v:p[3] }));
         const d = new Date(raw.start);
         last = { id:raw.id, name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
           source:'live', start:raw.start, durS:raw.durS, distM: raw.distM > 50 ? raw.distM : null, trace:an.trace,
-          events:classify(an.events, pts.map(p => ({ t:p.t, v:p.v }))), traffic: trafficOf(pts),
+          events:classify(an.events, pts), v2:true, traffic: trafficOf(pts),
           pts: pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
         trips.push(last);
       }
@@ -474,8 +512,8 @@ function onMotion(e){
   if (la && la.x !== null){ lx = la.x; ly = la.y; lz = la.z; }
   else { lx = ig.x-rec.grav.x; ly = ig.y-rec.grav.y; lz = ig.z-rec.grav.z; }
   const dot = lx*ux + ly*uy + lz*uz;
-  const h = Math.hypot(lx-dot*ux, ly-dot*uy, lz-dot*uz); // horizontal part only, so bumps don't count
-  const g = rec.an.push(t, h);
+  // horizontal part only, so bumps don't count
+  const g = rec.an.pushVec(t, lx-dot*ux, ly-dot*uy, lz-dot*uz);
   rec.gNow = g;
 }
 
@@ -523,8 +561,8 @@ function stop(){
   if (durS < 20){ showMsg('Trip was under 20 seconds, so it was not saved.'); return; }
   const d = new Date(r.start);
   const trip = { id:String(r.start), name: d.toLocaleDateString(undefined,{weekday:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}) + ' trip',
-    source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.speeds),
-    traffic: trafficOf(r.pts), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
+    source:'live', start:r.start, durS, distM: r.dist > 50 ? r.dist : null, trace:r.an.trace, events:classify(r.an.events, r.pts),
+    v2:true, traffic: trafficOf(r.pts), pts: r.pts.filter((p,i,a) => i===0 || i===a.length-1 || p.t - a[i-1].t >= 2 || p.v < SLOW) };
   trips.unshift(trip); saveTrips(trips); show(trip); renderList();
 }
 
@@ -558,8 +596,8 @@ $('csv-in').addEventListener('change', async ev => {
       let x=r[xi], y=r[yi], z=r[zi];
       if (hasG){ gx+=.02*(x-gx); gy+=.02*(y-gy); gz+=.02*(z-gz);
         const n=Math.hypot(gx,gy,gz)||1, ux=gx/n, uy=gy/n, uz=gz/n; x-=gx; y-=gy; z-=gz;
-        const d=x*ux+y*uy+z*uz; an.push(t, Math.hypot(x-d*ux,y-d*uy,z-d*uz)); }
-      else an.push(t, Math.hypot(x,y,z));
+        const d=x*ux+y*uy+z*uz; an.pushVec(t, x-d*ux, y-d*uy, z-d*uz); }
+      else an.pushVec(t, x, y, z);
     }
     an.finish(tEnd);
     const trip = { id:'imp'+Date.now(), name: f.name.replace(/\.csv$/i,''), source:'import', start:Date.now(), durS:tEnd, distM:null,
@@ -597,6 +635,8 @@ function show(trip){
   if (cnt('accel')) tips.push(`${cnt('accel')} quick start${cnt('accel')>1?'s':''}. Ease onto the pedal from signals and junctions; you rarely gain time and you burn more fuel.`);
   if (cnt('corner')) tips.push(`${cnt('corner')} sharp turn${cnt('corner')>1?'s':''}. Finish braking before the turn and keep a steady speed through it.`);
   if (cnt('jolt')) tips.push(trip.noGrav ? 'This file had no gravity data, so road bumps count toward the readings. Treat the numbers as rough.' : 'Speed data was not available, so events are not split into braking, acceleration and turns.');
+  const topKmh = trip.pts && trip.pts.length > 5 ? Math.max(...trip.pts.map(p => p.v)) * 3.6 : null;
+  if (topKmh !== null && topKmh < 15) tips.unshift(`Top speed was only ${Math.round(topKmh)} km/h, so this looks like walking or standing rather than driving. Jolts below 9 km/h are ignored, so the score says little about driving here.`);
   if (!ev.length) tips.push('Keep the same following distance. Steady inputs like these are what keep traffic flowing.');
   if (h.length) tips.push('Harsh events (≥ 0.35 g) are the ones passengers feel. Cutting these first gives the biggest gain in score.');
   $('tips').innerHTML = tips.map(t => `<li>${t}</li>`).join('');
@@ -647,7 +687,8 @@ function trafficOf(pts){
     else stops.push(s);
   };
   for (let i=1;i<pts.length;i++){
-    const p = pts[i], dt = Math.min(10, p.t - pts[i-1].t);
+    const p = pts[i], gap = p.t - pts[i-1].t, dt = Math.min(10, gap);
+    if (gap > 30 && distM(pts[i-1], p) > 60){ if (cur){ close(cur); cur = null; } continue; } // GPS dropped out while moving: not a stop
     if (p.v < SLOW){ slow += dt; if (!cur) cur = { t0:pts[i-1].t, t1:p.t, la:0, lo:0, n:0 }; cur.la += p.lat; cur.lo += p.lon; cur.n++; cur.t1 = p.t; }
     else if (cur){ close(cur); cur = null; }
   }
@@ -840,7 +881,7 @@ $('restore-in').addEventListener('change', async ev => {
     if (data.app !== 'smooth-drive' || !Array.isArray(data.trips)) throw 0;
     const have = new Set(trips.map(t => t.id)); let added = 0;
     data.trips.forEach(t => { if (t && t.id && Array.isArray(t.events) && !have.has(t.id)){ trips.push(t); added++; } });
-    trips.sort((a,b) => b.start - a.start); saveTrips(trips); renderList(); show(trips[0] || SAMPLE);
+    migrate(trips); trips.sort((a,b) => b.start - a.start); saveTrips(trips); renderList(); show(trips[0] || SAMPLE);
     exMsg.textContent = added ? `Restored ${added} trip${added>1?'s':''}.` : 'All trips in that backup are already here.';
   }catch(e){ exMsg.textContent = 'That file is not a Smooth Drive backup.'; }
 });
@@ -912,6 +953,7 @@ selDel.addEventListener('click', () => {
   if (!trips.length){ try{ localStorage.removeItem(KEY); }catch(e){} }
 });
 
+if (migrate(trips)) saveTrips(trips);
 renderList();
 show(trips[0] || SAMPLE);
 let savedTab = 'drive'; try{ savedTab = localStorage.getItem('smoothdrive.tab') || 'drive'; }catch(e){}

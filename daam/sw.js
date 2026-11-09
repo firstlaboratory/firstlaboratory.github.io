@@ -1,5 +1,5 @@
 // Daam offline cache: app shell is cached; exchange-rate calls always go to the network.
-const CACHE = "daam-v1";
+const CACHE = "daam-v2";
 const SHELL = ["./", "index.html", "manifest.json", "icon.svg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener("activate", e => {

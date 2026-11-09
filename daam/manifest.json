@@ -1,0 +1,11 @@
+{
+  "name": "Daam — world prices",
+  "short_name": "Daam",
+  "description": "Typical prices of everyday items and services by country, state and city, in any currency.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f6f5",
+  "theme_color": "#0f2f35",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}

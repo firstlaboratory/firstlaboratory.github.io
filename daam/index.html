@@ -87,6 +87,7 @@ select.mini{width:auto;padding:5px 8px;font:500 .82rem var(--mono);border-radius
 .src a:hover{text-decoration:underline}
 .range{font:500 .7rem var(--mono);color:var(--muted);margin-top:2px}
 .lookup{display:flex;flex-direction:column;gap:6px;padding:12px 14px;background:color-mix(in srgb,var(--accent) 12%,transparent);border-top:1px solid var(--line)}
+.live{display:inline-block;margin-top:3px;font:600 .66rem var(--body);letter-spacing:.04em;text-transform:uppercase;color:#1e8a4c}
 .empty{padding:24px 14px;color:var(--muted);text-align:center}
 .note{color:var(--muted);font-size:.8rem;line-height:1.5}
 </style>
@@ -134,7 +135,7 @@ select.mini{width:auto;padding:5px 8px;font:500 .82rem var(--mono);border-radius
     <div class="board" id="compareBoard"></div>
   </section>
 
-  <p class="note">Each price is the typical price you'd pay at an ordinary shop or provider in that city — not the lowest or highest. The smaller “usually” range shows how much it varies between shops and seasons. Prices are estimated from cost-of-living data, so treat them as a guide, not a quote. Indian fuel, LPG, vehicle and some grocery prices are set individually; vehicles are approximate on-road prices. Home services are labour only, per visit, for a basic job. Before you buy, use the links under each item to check today's price. Conversions use the exchange rates shown above; tap Refresh for the latest.</p>
+  <p class="note">Each price is the typical price you'd pay at an ordinary shop or provider in that city — not the lowest or highest. The smaller “usually” range shows how much it varies between shops and seasons. Prices are estimated from cost-of-living data, so treat them as a guide, not a quote. Indian fuel, LPG, vehicle and some grocery prices are set individually; vehicles are approximate on-road prices. Home services are labour only, per visit, for a basic job. Items marked “live” are updated every morning: gold and silver from world spot prices, and Indian vegetables, fruit and grains from government market (mandi) prices, converted to a typical shop price. Before you buy, use the links under each item to check today's price. Conversions use the exchange rates shown above; tap Refresh for the latest.</p>
 </div>
 
 <script>
@@ -313,7 +314,7 @@ function localPrice(c,st,it){
     case "appl": idx=(c.tech+c.g)/2;break;
     case "car": idx=c.car;break;
     case "cloth": idx=(c.g+c.tech)/2*(1+(m-1)*.3);break;
-    case "gold": idx=c.code==="IN"?1.06:1;break;
+    case "gold": return it.usd*(c.code==="IN"?1.09:1)*rates[c.cur]; // spot price + import duty & GST in India
     default: idx=1;
   }
   return it.usd*idx*BASE_RATES[c.cur];
@@ -411,7 +412,7 @@ function renderPlace(){
       const lp=localPrice(c,st,it);
       if(lp==null) return;
       const conv=shown.filter(cur=>cur!==c.cur).map(cur=>`<span>${fmt(convert(lp,c.cur,cur),cur)}</span>`).join("");
-      html+=`<div class="row"><div><div class="iname">${it.name}</div><div class="iunit">${it.unit}</div></div><div class="price">${fmt(lp,c.cur)}${(sp=>sp?`<div class="range">usually ${fmt(lp*sp[0],c.cur)}–${fmt(lp*sp[1],c.cur)}</div>`:`<div class="range">${EXACT.has(it.id)&&OVERRIDE[it.id]?.[c.code]!=null?"listed price":"same everywhere"}</div>`)(spread(it))}</div>${conv?`<div class="conv">${conv}</div>`:""}<div class="src"><span>Check today's price:</span>${sources(c,st,it).map(([l,u])=>`<a href="${u}" target="_blank" rel="noopener">${l} ↗</a>`).join("")}</div></div>`;
+      html+=`<div class="row"><div><div class="iname">${it.name}</div><div class="iunit">${it.unit}</div></div><div class="price">${fmt(lp,c.cur)}${(sp=>sp?`<div class="range">usually ${fmt(lp*sp[0],c.cur)}–${fmt(lp*sp[1],c.cur)}</div>`:`<div class="range">${EXACT.has(it.id)&&OVERRIDE[it.id]?.[c.code]!=null?"listed price":"same everywhere"}</div>`)(spread(it))}${liveTag(it,c)}</div>${conv?`<div class="conv">${conv}</div>`:""}<div class="src"><span>Check today's price:</span>${sources(c,st,it).map(([l,u])=>`<a href="${u}" target="_blank" rel="noopener">${l} ↗</a>`).join("")}</div></div>`;
     });
   });
   if(q){
@@ -485,7 +486,29 @@ $("refresh").addEventListener("click",refreshRates);
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}
 if(!ratesWhen||Date.now()-ratesWhen>12*3600e3){setTimeout(refreshRates,600)}
 
-fillPlaceSelects();fillCompareSelects();renderCats();renderStamp();renderAll();
+
+// ---- Daily live prices (written by the GitHub job into prices.json) ----
+const LIVE={};
+function liveTag(it,c){const d=LIVE[it.id];if(!d)return"";if(d.india&&c.code!=="IN")return"";
+  return `<div class="live">● live · ${new Date(d.when).toLocaleDateString([], {day:"numeric",month:"short"})}</div>`}
+async function loadLive(){
+  try{
+    const r=await fetch("prices.json?d="+new Date().toISOString().slice(0,10),{cache:"no-store"});if(!r.ok)return;
+    const j=await r.json();
+    if(j.rates&&j.rates_updated&&(!ratesWhen||Date.parse(j.rates_updated)>ratesWhen)){
+      Object.keys(BASE_RATES).forEach(k=>{if(j.rates[k])rates[k]=j.rates[k]});ratesWhen=Date.parse(j.rates_updated);store.set("rates",rates);store.set("ratesWhen",ratesWhen);renderStamp()}
+    const set=(id,usd,when)=>{const it=ITEMS.find(i=>i.id===id);if(it&&usd>0){it.usd=usd;LIVE[id]={when}}};
+    if(j.gold){set("gold",j.gold.usd_per_g*10,j.gold.updated);set("gold22",j.gold.usd_per_g*10*.916,j.gold.updated)}
+    if(j.silver){set("silver",j.silver.usd_per_g*1000,j.silver.updated)}
+    Object.entries(j.mandi||{}).forEach(([id,m])=>{
+      const o=OVERRIDE[id]=OVERRIDE[id]||{};
+      Object.entries(m).forEach(([k,v])=>{if(k==="updated")return;if(k==="IN")o.IN=v;else o["IN:"+k]=v});
+      LIVE[id]={when:m.updated,india:true};
+    });
+    renderAll();
+  }catch{}
+}
+fillPlaceSelects();fillCompareSelects();renderCats();renderStamp();renderAll();loadLive();
 </script>
 
 </body>
